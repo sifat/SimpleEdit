@@ -11,6 +11,42 @@ app should be: real menus, real tabs, real save panels, no bundled browser.
 One Go helper binary ships inside the bundle and does the JSON formatting — see
 [The Go helper](#the-go-helper).
 
+## Install
+
+Grab `SimpleEdit.zip` from the [latest release](https://github.com/sifat/SimpleEdit/releases/latest), then:
+
+```sh
+unzip SimpleEdit.zip
+mv SimpleEdit.app /Applications/
+xattr -dr com.apple.quarantine /Applications/SimpleEdit.app
+open /Applications/SimpleEdit.app
+```
+
+**The `xattr` line is required.** The app is ad-hoc signed rather than signed with
+a paid Apple Developer ID, so macOS quarantines it on download and reports
+*"SimpleEdit is damaged and can't be opened"*. That message means "not signed by a
+registered developer", not "corrupted" — and right-click ▸ Open does not get past
+it on macOS 15+.
+
+The download is a universal binary, so it runs on both Apple Silicon and Intel Macs.
+
+## Cutting a release
+
+```sh
+./build.sh --universal --zip     # -> build/SimpleEdit.zip
+```
+
+Then create the release and attach the zip — either through the web UI
+(repo ▸ Releases ▸ Draft a new release) or with the API:
+
+```sh
+gh release create v1.1 build/SimpleEdit.zip --title "SimpleEdit 1.1" --notes-file NOTES.md
+```
+
+Always use `--universal`; a default build is arm64-only and will not launch on an
+Intel Mac. Put the `xattr` instruction in the release notes, or the first thing
+anyone downloading it will hit is "damaged".
+
 ## Build and run
 
 ```sh
