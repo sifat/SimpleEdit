@@ -15,9 +15,11 @@ let output = root.appendingPathComponent("Resources/AppIcon.icns")
 func rgb(_ r: Int, _ g: Int, _ b: Int, _ a: CGFloat = 1) -> NSColor {
     NSColor(srgbRed: CGFloat(r) / 255, green: CGFloat(g) / 255, blue: CGFloat(b) / 255, alpha: a)
 }
-let topColor = rgb(108, 140, 255)
-let bottomColor = rgb(43, 74, 203)
-let accent = rgb(255, 212, 121)
+let topColor = rgb(150, 208, 252)
+let bottomColor = rgb(56, 138, 219)
+// Amber reads as syntax highlighting and still separates from a light blue
+// ground; a second blue would disappear into it.
+let accent = rgb(255, 176, 59)
 
 // MARK: - Drawing
 
