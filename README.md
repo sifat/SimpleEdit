@@ -47,6 +47,85 @@ association:
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f build/SimpleEdit.app
 ```
 
+## Sharing it with other people
+
+The app is **ad-hoc signed** — there is no Apple Developer ID on this machine
+(`security find-identity -v -p codesigning` reports 0 identities). That is fine
+locally, because Gatekeeper only inspects files carrying the
+`com.apple.quarantine` flag and a local build never has one. It is *not* fine the
+moment the app travels: AirDrop, a downloaded zip, Slack and email all set that
+flag, and macOS then refuses to open it.
+
+Pick the option that matches who you are sending it to.
+
+### 1. Send them the source (simplest, no Gatekeeper problem)
+
+Push this repo and let them build it:
+
+```sh
+git clone <your-repo-url> && cd very-simple-text-editor
+./build.sh && open build/SimpleEdit.app
+```
+
+They need Xcode (or the Command Line Tools) and Go. Nothing is signed, nothing is
+blocked, and they can read what they are running.
+
+### 2. Send them the .app (works, but they must clear the quarantine flag)
+
+```sh
+./build.sh --universal --zip     # -> build/SimpleEdit.zip, arm64 + Intel, ~1.8 MB
+```
+
+Send `build/SimpleEdit.zip`. On their machine:
+
+```sh
+unzip SimpleEdit.zip
+mv SimpleEdit.app /Applications/
+xattr -dr com.apple.quarantine /Applications/SimpleEdit.app
+open /Applications/SimpleEdit.app
+```
+
+Without that `xattr` line macOS reports *"SimpleEdit is damaged and can't be
+opened"* — which is Gatekeeper's message for a quarantined ad-hoc signature, not
+an actual corrupted download. Right-clicking ▸ Open does **not** get past it, and
+on macOS 15+ the old bypass is gone. This is fine for colleagues you can send a
+command to; it is not something to hand a non-technical person.
+
+### 3. Sign and notarize it (the only version that "just works")
+
+Needs the Apple Developer Program ($99/year) and a Developer ID Application
+certificate. Then, instead of the ad-hoc step in `build.sh`:
+
+```sh
+codesign --force --options runtime --timestamp \
+    --sign "Developer ID Application: YOUR NAME (TEAMID)" \
+    build/SimpleEdit.app/Contents/MacOS/jsonfmt
+codesign --force --options runtime --timestamp \
+    --sign "Developer ID Application: YOUR NAME (TEAMID)" \
+    build/SimpleEdit.app
+
+ditto -c -k --keepParent build/SimpleEdit.app build/SimpleEdit.zip
+xcrun notarytool submit build/SimpleEdit.zip \
+    --apple-id you@example.com --team-id TEAMID --password APP_SPECIFIC_PASSWORD \
+    --wait
+xcrun stapler staple build/SimpleEdit.app
+```
+
+Note the differences from the local build: `--options runtime` (hardened runtime,
+required for notarization) and `--timestamp`. Staple the `.app`, then re-zip it
+for distribution. After that it opens anywhere with no warning and no terminal
+commands.
+
+### Architectures
+
+`./build.sh` alone builds arm64 only, which is right for working on this machine.
+Use `--universal` for anything you send to someone else — it produces an
+`x86_64 arm64` binary, so it runs on Intel Macs too. Verify with:
+
+```sh
+lipo -archs build/SimpleEdit.app/Contents/MacOS/SimpleEdit
+```
+
 ## Shortcuts
 
 | | |
