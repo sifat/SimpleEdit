@@ -116,6 +116,24 @@ required for notarization) and `--timestamp`. Staple the `.app`, then re-zip it
 for distribution. After that it opens anywhere with no warning and no terminal
 commands.
 
+### App icon
+
+`Resources/AppIcon.icns` is generated, not hand-drawn, so it can be edited as code:
+
+```sh
+xcrun swift tools/appicon/make-icon.swift
+```
+
+That renders every size the iconset needs (16 through 512@2x), each drawn at its
+real pixel size rather than downsampled from the 1024 artwork, and runs
+`iconutil`. `build.sh` copies the result into `Contents/Resources`, and
+`CFBundleIconFile` in Info.plist points at it. After changing the icon, re-register
+the bundle or Finder keeps showing the old one:
+
+```sh
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f build/SimpleEdit.app
+```
+
 ### Architectures
 
 `./build.sh` alone builds arm64 only, which is right for working on this machine.

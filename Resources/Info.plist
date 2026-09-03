@@ -23,6 +23,9 @@
 	<string>NSApplication</string>
 	<key>NSHighResolutionCapable</key>
 	<true/>
+	<!-- Resolved against Contents/Resources; the .icns extension is implied. -->
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 
 	<!-- TCC gates these folders for non-sandboxed apps too, and restoring tabs
 	     at launch reads files without an open panel, which can trip a prompt. -->
