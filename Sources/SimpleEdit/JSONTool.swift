@@ -7,6 +7,13 @@ enum JSONMode: String {
     case validate
 }
 
+extension UInt8 {
+    /// The four bytes RFC 8259 counts as whitespace between tokens.
+    var isJSONWhitespace: Bool {
+        self == 0x20 || self == 0x09 || self == 0x0A || self == 0x0D
+    }
+}
+
 struct JSONToolError: Error {
     /// UTF-8 byte offset of the problem, or nil when the helper could not say.
     let byteOffset: Int?
@@ -21,7 +28,9 @@ struct JSONToolError: Error {
 /// keys, number literals and string escapes all survive verbatim.
 enum JSONTool {
 
-    static func run(_ mode: JSONMode, on source: String) throws -> String {
+    /// Takes bytes rather than a String so the caller can slice a BOM off without
+    /// copying, and so the document is not re-encoded on the way in.
+    static func run(_ mode: JSONMode, on source: Data) throws -> String {
         guard let executable = Bundle.main.url(forAuxiliaryExecutable: "jsonfmt") else {
             throw JSONToolError(
                 byteOffset: nil,
@@ -64,7 +73,7 @@ enum JSONTool {
 
         // try? because the helper may already have exited on a usage error, and a
         // failed write is reported by the exit status below rather than here.
-        try? input.fileHandleForWriting.write(contentsOf: Data(source.utf8))
+        try? input.fileHandleForWriting.write(contentsOf: source)
         try? input.fileHandleForWriting.close()
 
         group.wait()

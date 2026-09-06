@@ -131,6 +131,9 @@ lipo -archs build/SimpleEdit.app/Contents/MacOS/SimpleEdit
 | Minify JSON | ⇧⌃⌘J |
 | Line Numbers | ⌃⌘L |
 | Wrap Lines | ⌥⌘W |
+| Appearance | View ▸ Appearance ▸ System / Light / Dark |
+| Page Setup / Print | ⇧⌘P · ⌘P |
+| Export as PDF | File ▸ Export as PDF… |
 | Next / Previous tab | ⌃⇥ · ⌃⇧⇥ (also ⇧⌘] · ⇧⌘[) |
 | Enter / Exit Full Screen | ⌃⌘F |
 | Minimize / Zoom | ⌘M · Window ▸ Zoom (or double-click the title bar) |
@@ -141,7 +144,7 @@ matches, and the Replace disclosure reveals a `Replace` button (one at a time) a
 
 ## The Go helper
 
-`tools/jsonfmt` is ~30 lines of Go with no dependencies, built into
+`tools/jsonfmt` is ~100 lines of Go with no dependencies, built into
 `SimpleEdit.app/Contents/MacOS/jsonfmt`. It is independently runnable:
 
 ```sh
@@ -175,22 +178,35 @@ Nothing is currently known to be broken in normal use. What follows is an honest
 list of what has and has not been exercised end to end.
 
 **Verified working:** opening and saving files, arbitrary file extensions, tabs
-(including the + button and ⇧⌘] switching), typing and undo, line numbers,
-⌘F with Escape returning the caret to the text, JSON format / minify, and the JSON
-error path reporting the right line and column on non-ASCII input.
-
-**Not yet verified:**
-
-- Replace-one-by-one and Replace All in the find bar.
-- The unsaved-changes sheet when closing a dirty tab or quitting.
-- Tab restore after relaunch (the `UserDefaults` path; macOS window restoration
-  appears to bring tabs back on its own, which masks whether ours works).
+(including the + button and ⇧⌘] switching), typing and undo, line numbers (including
+on a 13.9 MB, 400k-line file), ⌘F with Escape returning the caret to the text,
+Replace and Replace All (with Replace All undoing as a single step), JSON format /
+minify, the JSON error path reporting the right line and column on non-ASCII input,
+the unsaved-changes sheet when closing a dirty tab, dark mode and the appearance
+toggle, printing (5 correctly paginated pages from a 122-line file, verified through
+PDF export), and autosave recovery — an unsaved edit survives `kill -9` while the
+file on disk stays byte-identical.
 
 **Seen once, not reproduced:** ⌘W closed a tab other than the selected one. It
 happened during scripted UI testing, with the intended tab selected and its title
 in the title bar, so it may equally have been an artefact of synthesised
 keystrokes. Worth watching for; if you can reproduce it by hand, that is a real
 bug in how Close routes through the responder chain.
+
+## Roadmap
+
+Planned for the next version, in no particular order.
+
+- **Syntax highlighting** for widely used languages. Which languages is an open
+  question and will be decided as it goes — this is a continuous process rather
+  than a single release. The likely stack is `tree-sitter` with the first-party
+  `swift-tree-sitter` binding, which is what CotEditor 7 ships; that would be this
+  project's first third-party dependency, so it is a deliberate decision rather
+  than an implementation detail. On the TextKit 2 side the hook is
+  `NSTextLayoutManager.renderingAttributesValidator`, pulled during fragment
+  layout. Colour has to stay in rendering attributes and out of `NSTextStorage`,
+  or it reaches undo, the edited flag and the save path.
+Nothing else is planned for the next release.
 
 ## Notes and limitations
 
@@ -199,11 +215,36 @@ bug in how Close routes through the responder chain.
 - **Saving replaces symlinks.** `NSDocument`'s safe-save writes a temp file and
   swaps it in, so editing a symlinked dotfile (say `~/.zshrc` pointing into a
   dotfiles repo) replaces the symlink with a regular file.
+- **Line numbers stop above 64 MB.** Past that the gutter draws an empty strip
+  rather than a wrong number. Reading and scrolling a file of any size costs
+  nothing, since the index is only rebuilt after an edit; typing into one that
+  large still pays a rescan per frame, which is what an incremental index would
+  fix if it ever becomes worth doing.
 - **Encoding detection is a guess** when a file is not UTF-8, and there is no
   encoding menu. Line endings (LF/CRLF/CR) and a UTF-8 BOM are detected on open and
   restored on save.
-- **Untitled tabs do not come back.** Reopening on relaunch tracks file URLs, so
-  unsaved new tabs have nothing to restore from.
+- **Printing reflows for the paper.** Print builds a throwaway text view sized to
+  the page rather than printing the one on screen, so the line-number gutter does
+  not appear on paper and a document with wrapping turned off does not print as one
+  absurdly wide page. It sets 10pt rather than the editor's 13pt, which is what lets
+  a normal 80-column line fit the width. There are no page headers or footers yet.
+- **Appearance is app-wide, not per-window.** View ▸ Appearance sets
+  `NSApp.appearance`, so every tab and every window opened later follows it. The
+  choice is stored in `UserDefaults`; an absent key means System, so a fresh
+  install follows the system setting exactly as it always did. In Dark Aqua the
+  gutter and the text background are nearly the same shade — that is
+  `controlBackgroundColor` and `textBackgroundColor` converging, and the hairline
+  separator is what distinguishes them.
+- **Autosave writes recovery copies, never your file.** Every 30 seconds an edited
+  document is written to `~/Library/Autosave Information/`. The file you opened is
+  only ever written when you save it, so pointing the editor at `~/.zshrc` to read
+  it cannot rewrite it behind your back, and the unsaved-changes sheet on close
+  still appears. After a crash macOS reopens the recovered copy. It can also open
+  the same file twice — once from saved window state, once from the autosave record
+  — which the app reconciles at launch, keeping whichever copy holds unsaved work.
+- **Untitled tabs may not come back.** Reopening on relaunch tracks file URLs, so
+  unsaved new tabs have nothing to restore from. Autosave may now cover some of
+  this, since `autosavesDrafts` defaults to on, but that path is untested.
 - **Rebuilds look like a new app to TCC.** The ad-hoc signature has no stable
   identity, so granted Files & Folders permissions do not persist across builds. If
   a copy picks up a quarantine flag (AirDrop, a downloaded zip) and macOS calls it
