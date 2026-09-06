@@ -178,16 +178,14 @@ Nothing is currently known to be broken in normal use. What follows is an honest
 list of what has and has not been exercised end to end.
 
 **Verified working:** opening and saving files, arbitrary file extensions, tabs
-(including the + button and ⇧⌘] switching), typing and undo, line numbers
-(including on a 13.9 MB, 400k-line file), ⌘F with Escape returning the caret to the
-text, JSON format / minify, the JSON error path reporting the right line and column
-on non-ASCII input, the unsaved-changes sheet when closing a dirty tab, and autosave
-recovery — an unsaved edit survives `kill -9` while the file on disk stays
-byte-identical.
-
-**Not yet verified:**
-
-- Replace-one-by-one and Replace All in the find bar.
+(including the + button and ⇧⌘] switching), typing and undo, line numbers (including
+on a 13.9 MB, 400k-line file), ⌘F with Escape returning the caret to the text,
+Replace and Replace All (with Replace All undoing as a single step), JSON format /
+minify, the JSON error path reporting the right line and column on non-ASCII input,
+the unsaved-changes sheet when closing a dirty tab, dark mode and the appearance
+toggle, printing (5 correctly paginated pages from a 122-line file, verified through
+PDF export), and autosave recovery — an unsaved edit survives `kill -9` while the
+file on disk stays byte-identical.
 
 **Seen once, not reproduced:** ⌘W closed a tab other than the selected one. It
 happened during scripted UI testing, with the intended tab selected and its title
