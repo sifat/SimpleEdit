@@ -151,6 +151,17 @@ enum MainMenu {
             [.command, .option]
         )
         menu.addItem(.separator())
+
+        let appearance = NSMenu(title: "Appearance")
+        for setting in AppearanceSetting.allCases {
+            appearance.item(
+                setting.title,
+                #selector(AppDelegate.changeAppearance(_:))
+            ).tag = setting.tag
+        }
+        menu.addItem(submenu: appearance)
+
+        menu.addItem(.separator())
         // AppKit retitles this to "Exit Full Screen" by itself.
         menu.item(
             "Enter Full Screen",

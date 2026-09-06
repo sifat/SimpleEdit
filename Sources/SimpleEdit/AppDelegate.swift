@@ -11,6 +11,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private let recentDocuments = RecentDocumentsMenuDelegate()
 
+    private static let appearanceKey = "Appearance"
     private static let restoreKey = "OpenDocumentPaths"
     private var pendingRestore: [URL] = []
     private var didFinishLaunching = false
@@ -26,6 +27,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // JSONTool writes to a child process's stdin. If that child ever exits
         // early, an unguarded write raises SIGPIPE and kills the app.
         signal(SIGPIPE, SIG_IGN)
+
+        // Before any window exists, so a forced Light or Dark never shows as a
+        // flash of the system appearance at launch.
+        applyAppearance(appearanceSetting)
 
         // The menu bar must exist before AppKit's launch-time checks run.
         NSApp.mainMenu = MainMenu.build(appName: appName, recentsDelegate: recentDocuments)
@@ -92,6 +97,37 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         true
     }
 
+    // MARK: - Appearance
+
+    /// An absent key means System, deliberately, rather than registering a
+    /// default: a fresh install then behaves exactly as it did before this
+    /// preference existed.
+    private var appearanceSetting: AppearanceSetting {
+        get {
+            guard let raw = UserDefaults.standard.string(forKey: Self.appearanceKey),
+                  let setting = AppearanceSetting(rawValue: raw)
+            else { return .system }
+            return setting
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: Self.appearanceKey)
+            applyAppearance(newValue)
+        }
+    }
+
+    /// Setting it on NSApp is enough for every window, including tabs and
+    /// windows opened later: effectiveAppearance resolves view -> window ->
+    /// application at draw time, and nothing in this app sets `appearance` on a
+    /// window of its own, so they all inherit.
+    private func applyAppearance(_ setting: AppearanceSetting) {
+        NSApp.appearance = setting.appearance
+    }
+
+    @objc func changeAppearance(_ sender: NSMenuItem) {
+        guard let setting = AppearanceSetting(tag: sender.tag) else { return }
+        appearanceSetting = setting
+    }
+
     // MARK: - Tabs
 
     /// The + button in the tab bar does not appear unless this exists somewhere
@@ -155,6 +191,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         false
+    }
+}
+
+extension AppDelegate: NSMenuItemValidation {
+    /// The Appearance items target First Responder and nothing before the app
+    /// delegate implements changeAppearance:, so validation lands here and can
+    /// put the checkmark on the active one.
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        if menuItem.action == #selector(changeAppearance(_:)) {
+            menuItem.state = menuItem.tag == appearanceSetting.tag ? .on : .off
+        }
+        return true
     }
 }
 

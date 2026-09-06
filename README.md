@@ -131,6 +131,7 @@ lipo -archs build/SimpleEdit.app/Contents/MacOS/SimpleEdit
 | Minify JSON | ⇧⌃⌘J |
 | Line Numbers | ⌃⌘L |
 | Wrap Lines | ⌥⌘W |
+| Appearance | View ▸ Appearance ▸ System / Light / Dark |
 | Next / Previous tab | ⌃⇥ · ⌃⇧⇥ (also ⇧⌘] · ⇧⌘[) |
 | Enter / Exit Full Screen | ⌃⌘F |
 | Minimize / Zoom | ⌘M · Window ▸ Zoom (or double-click the title bar) |
@@ -196,13 +197,6 @@ bug in how Close routes through the responder chain.
 
 Planned for the next version, in no particular order.
 
-- **Dark mode.** Nothing hardcodes a colour today: the only three the app sets are
-  semantic (`controlBackgroundColor`, `separatorColor`, `secondaryLabelColor`), the
-  text view is left on its defaults, and no appearance is forced in Info.plist — so
-  a good deal of this may already work, and the first job is to check rather than to
-  write. The work proper is a View ▸ Appearance toggle (System / Light / Dark)
-  persisted in `UserDefaults` and applied through `NSApp.appearance`, plus a theme
-  type that syntax highlighting can share.
 - **Syntax highlighting** for widely used languages. Which languages is an open
   question and will be decided as it goes — this is a continuous process rather
   than a single release. The likely stack is `tree-sitter` with the first-party
@@ -233,6 +227,13 @@ Planned for the next version, in no particular order.
 - **Encoding detection is a guess** when a file is not UTF-8, and there is no
   encoding menu. Line endings (LF/CRLF/CR) and a UTF-8 BOM are detected on open and
   restored on save.
+- **Appearance is app-wide, not per-window.** View ▸ Appearance sets
+  `NSApp.appearance`, so every tab and every window opened later follows it. The
+  choice is stored in `UserDefaults`; an absent key means System, so a fresh
+  install follows the system setting exactly as it always did. In Dark Aqua the
+  gutter and the text background are nearly the same shade — that is
+  `controlBackgroundColor` and `textBackgroundColor` converging, and the hairline
+  separator is what distinguishes them.
 - **Autosave writes recovery copies, never your file.** Every 30 seconds an edited
   document is written to `~/Library/Autosave Information/`. The file you opened is
   only ever written when you save it, so pointing the editor at `~/.zshrc` to read
