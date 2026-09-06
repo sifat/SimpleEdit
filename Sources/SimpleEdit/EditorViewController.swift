@@ -117,7 +117,11 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
         // and registers no undo, so opening a file does not mark it edited.
         textView.string = document.text
 
-        if longestLineLength(in: textView.string) > Self.wrapDisableLineLength {
+        let longest = TextMetrics.longestLineLength(
+            in: textView.string,
+            stoppingAbove: Self.wrapDisableLineLength
+        )
+        if longest > Self.wrapDisableLineLength {
             wrapsLines = false
             applyWrapping()
         }
@@ -272,21 +276,6 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
         textView.needsDisplay = true
     }
 
-    private func longestLineLength(in text: String) -> Int {
-        var longest = 0
-        var current = 0
-        for byte in text.utf8 {
-            if byte == UInt8(ascii: "\n") {
-                longest = max(longest, current)
-                current = 0
-                // Early out: we only care whether it crosses the threshold.
-                if longest > Self.wrapDisableLineLength { return longest }
-            } else {
-                current += 1
-            }
-        }
-        return max(longest, current)
-    }
 }
 
 // MARK: - Menu validation
