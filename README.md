@@ -132,6 +132,8 @@ lipo -archs build/SimpleEdit.app/Contents/MacOS/SimpleEdit
 | Line Numbers | ⌃⌘L |
 | Wrap Lines | ⌥⌘W |
 | Appearance | View ▸ Appearance ▸ System / Light / Dark |
+| Page Setup / Print | ⇧⌘P · ⌘P |
+| Export as PDF | File ▸ Export as PDF… |
 | Next / Previous tab | ⌃⇥ · ⌃⇧⇥ (also ⇧⌘] · ⇧⌘[) |
 | Enter / Exit Full Screen | ⌃⌘F |
 | Minimize / Zoom | ⌘M · Window ▸ Zoom (or double-click the title bar) |
@@ -206,11 +208,7 @@ Planned for the next version, in no particular order.
   `NSTextLayoutManager.renderingAttributesValidator`, pulled during fragment
   layout. Colour has to stay in rendering attributes and out of `NSTextStorage`,
   or it reaches undo, the edited flag and the save path.
-- **Print and print preview.** ⌘P does nothing today — the File menu has no Print
-  item, so nothing routes to `NSDocument.printDocument(_:)`. The work is those menu
-  items plus an `NSPrintOperation` over a print-only text view (the on-screen one is
-  sized for the window and has the gutter attached). Preview itself is free: the
-  standard print panel has had one since 10.5.
+Nothing else is planned for the next release.
 
 ## Notes and limitations
 
@@ -227,6 +225,11 @@ Planned for the next version, in no particular order.
 - **Encoding detection is a guess** when a file is not UTF-8, and there is no
   encoding menu. Line endings (LF/CRLF/CR) and a UTF-8 BOM are detected on open and
   restored on save.
+- **Printing reflows for the paper.** Print builds a throwaway text view sized to
+  the page rather than printing the one on screen, so the line-number gutter does
+  not appear on paper and a document with wrapping turned off does not print as one
+  absurdly wide page. It sets 10pt rather than the editor's 13pt, which is what lets
+  a normal 80-column line fit the width. There are no page headers or footers yet.
 - **Appearance is app-wide, not per-window.** View ▸ Appearance sets
   `NSApp.appearance`, so every tab and every window opened later follows it. The
   choice is stored in `UserDefaults`; an absent key means System, so a fresh

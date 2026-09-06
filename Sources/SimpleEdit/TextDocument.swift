@@ -88,6 +88,67 @@ final class TextDocument: NSDocument {
         return TextFileIO.encode(storage.decoded)
     }
 
+    // MARK: - Printing
+
+    /// Prints a throwaway text view built for the paper, never the one on screen.
+    ///
+    /// The on-screen view is sized to the window, carries the line-number ruler,
+    /// and when wrapping is off has a container of effectively infinite width --
+    /// printing it yields a single absurdly wide page.
+    ///
+    /// The print view is TextKit **1** on purpose. Pagination goes through
+    /// knowsPageRange:/rectForPage:, which the layout manager drives; that path is
+    /// decades old under TextKit 1, while TextKit 2 is built around laying out
+    /// only the visible viewport -- the opposite of what paginating a whole
+    /// document needs. This view is ephemeral and never enters a window, so the
+    /// app stays TextKit 2 on screen and never has to find out whether TextKit 2
+    /// pagination works. Reading `layoutManager` here is safe for the same
+    /// reason it is forbidden elsewhere: this view really is TextKit 1, so there
+    /// is no TextKit 2 instance to silently downgrade.
+    override func printOperation(
+        withSettings printSettings: [NSPrintInfo.AttributeKey: Any]
+    ) throws -> NSPrintOperation {
+        if let editor = windowControllers.first?.contentViewController as? EditorViewController {
+            editor.commitTextToDocument()
+        }
+
+        let attributes = (printInfo.dictionary() as? [NSPrintInfo.AttributeKey: Any]) ?? [:]
+        let info = NSPrintInfo(dictionary: attributes.merging(printSettings) { _, new in new })
+
+        let contentWidth = max(1, info.paperSize.width - info.leftMargin - info.rightMargin)
+
+        let printView = NSTextView(usingTextLayoutManager: false)
+        printView.frame = NSRect(x: 0, y: 0, width: contentWidth, height: contentWidth)
+        printView.isRichText = false
+        printView.isEditable = false
+        printView.textContainerInset = .zero
+        // 10pt, not the editor's 13pt. A US Letter page minus default margins is
+        // 468pt wide, which fits about 78 monospaced columns at 10pt and only
+        // about 60 at 13pt -- so matching the screen size would wrap ordinary
+        // 80-column code that has no business wrapping on paper.
+        printView.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .regular)
+        printView.isHorizontallyResizable = false
+        printView.isVerticallyResizable = true
+        printView.maxSize = NSSize(width: contentWidth, height: .greatestFiniteMagnitude)
+        printView.textContainer?.containerSize = NSSize(
+            width: contentWidth,
+            height: .greatestFiniteMagnitude
+        )
+        printView.textContainer?.widthTracksTextView = true
+        printView.string = storage.text
+
+        // Lay out before measuring, or sizeToFit sees an empty view and every
+        // page after the first comes out blank.
+        if let container = printView.textContainer {
+            printView.layoutManager?.ensureLayout(for: container)
+        }
+        printView.sizeToFit()
+
+        let operation = NSPrintOperation(view: printView, printInfo: info)
+        operation.jobTitle = displayName
+        return operation
+    }
+
     // MARK: - Save panel
 
     override func prepareSavePanel(_ savePanel: NSSavePanel) -> Bool {
