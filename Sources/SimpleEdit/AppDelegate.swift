@@ -28,6 +28,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The menu bar must exist before AppKit's launch-time checks run.
         NSApp.mainMenu = MainMenu.build(appName: appName, recentsDelegate: recentDocuments)
 
+        // Periodic autosave defaults to OFF: NSDocumentController.autosavingDelay
+        // is documented as "a value of 0 indicates that periodic autosaving
+        // should not be done at all", and 0 is the default.
+        //
+        // This is the pre-10.7 crash-protection path, not autosave-in-place.
+        // Because TextDocument.autosavesInPlace stays false, AppKit uses
+        // NSAutosaveElsewhereOperation -- "writing of a document's current
+        // contents to a file or file package that is separate from the
+        // document's current one, without changing the document's current one".
+        // The user's actual file is still only written when they ask for it.
+        //
+        // 30s rather than something tighter because writing happens on the main
+        // thread: data(ofType:) reaches into the view, so this cannot be made
+        // asynchronous without crashing.
+        documentController.autosavingDelay = 30
+
         pendingRestore = (UserDefaults.standard.array(forKey: Self.restoreKey) as? [String] ?? [])
             .map { URL(fileURLWithPath: $0) }
             .filter { FileManager.default.fileExists(atPath: $0.path) }
