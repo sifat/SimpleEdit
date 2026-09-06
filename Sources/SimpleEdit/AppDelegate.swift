@@ -13,6 +13,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private static let restoreKey = "OpenDocumentPaths"
     private var pendingRestore: [URL] = []
+    private var didFinishLaunching = false
+    private var didFinishRestoring = false
 
     private var appName: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "SimpleEdit"
@@ -28,6 +30,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The menu bar must exist before AppKit's launch-time checks run.
         NSApp.mainMenu = MainMenu.build(appName: appName, recentsDelegate: recentDocuments)
 
+        // Periodic autosave defaults to OFF: NSDocumentController.autosavingDelay
+        // is documented as "a value of 0 indicates that periodic autosaving
+        // should not be done at all", and 0 is the default.
+        //
+        // This is the pre-10.7 crash-protection path, not autosave-in-place.
+        // Because TextDocument.autosavesInPlace stays false, AppKit uses
+        // NSAutosaveElsewhereOperation -- "writing of a document's current
+        // contents to a file or file package that is separate from the
+        // document's current one, without changing the document's current one".
+        // The user's actual file is still only written when they ask for it.
+        //
+        // 30s rather than something tighter because writing happens on the main
+        // thread: data(ofType:) reaches into the view, so this cannot be made
+        // asynchronous without crashing.
+        documentController.autosavingDelay = 30
+
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowRestorationDidFinish),
+            name: NSApplication.didFinishRestoringWindowsNotification,
+            object: nil
+        )
+
         pendingRestore = (UserDefaults.standard.array(forKey: Self.restoreKey) as? [String] ?? [])
             .map { URL(fileURLWithPath: $0) }
             .filter { FileManager.default.fileExists(atPath: $0.path) }
@@ -35,7 +60,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.activate()
+        didFinishLaunching = true
+        restoreSessionIfReady()
+    }
+
+    /// Our restore has to wait for AppKit's to finish, or the already-open check
+    /// below sees nothing and reopens files AppKit is about to restore anyway.
+    ///
+    /// NSWindowRestoration.h is explicit that this notification "may be posted
+    /// before or after NSApplicationDidFinishLaunching", so neither event can be
+    /// assumed to arrive second; whichever is last does the work. It is always
+    /// posted, even when there was nothing to restore, so the pending list
+    /// cannot be stranded.
+    @objc private func windowRestorationDidFinish() {
+        didFinishRestoring = true
+        restoreSessionIfReady()
+    }
+
+    private func restoreSessionIfReady() {
+        guard didFinishLaunching, didFinishRestoring else { return }
         reopenPendingDocuments()
+        closeDuplicateDocuments()
     }
 
     /// Suppress the automatic blank document when we are about to restore tabs.
@@ -65,7 +110,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let urls = pendingRestore
         pendingRestore = []
         for url in urls {
+            // Skip anything AppKit already put on screen, or the same file gets
+            // a second tab.
+            guard documentController.document(for: url) == nil else { continue }
             documentController.openDocument(withContentsOf: url, display: true) { _, _, _ in }
+        }
+    }
+
+    /// Collapses two tabs showing the same file down to one.
+    ///
+    /// Turning autosave on made AppKit open some documents twice after a crash:
+    /// once from saved window state and once from the autosave record. Measured
+    /// -- by the time NSApplicationDidFinishRestoringWindows arrives, the
+    /// duplicate is already there, before any of our own restore code runs, so
+    /// this cannot be fixed by reordering or by skipping on our side.
+    ///
+    /// Keep whichever copy carries unsaved work. If both do, keep both: two tabs
+    /// is a confusing outcome, but silently closing someone's unsaved edit to
+    /// tidy the window is a much worse one. `close()` discards without asking,
+    /// so it is only ever reached for a document with nothing to lose.
+    private func closeDuplicateDocuments() {
+        var keptByURL: [URL: NSDocument] = [:]
+
+        for document in documentController.documents {
+            guard let url = document.fileURL?.standardizedFileURL else { continue }
+            guard let incumbent = keptByURL[url] else {
+                keptByURL[url] = document
+                continue
+            }
+
+            if !document.isDocumentEdited {
+                document.close()
+            } else if !incumbent.isDocumentEdited {
+                keptByURL[url] = document
+                incumbent.close()
+            }
         }
     }
 

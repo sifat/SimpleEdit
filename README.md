@@ -192,6 +192,26 @@ in the title bar, so it may equally have been an artefact of synthesised
 keystrokes. Worth watching for; if you can reproduce it by hand, that is a real
 bug in how Close routes through the responder chain.
 
+## Roadmap
+
+Planned for the next version, in no particular order.
+
+- **Dark mode.** The editor currently hardcodes its colours. The work is to drive
+  the text view, the gutter and the JSON error highlight from
+  `NSColor.textColor` / `textBackgroundColor` / `controlBackgroundColor` and
+  redraw the ruler on `NSApp.effectiveAppearance` changes, so it follows the
+  system setting instead of ignoring it.
+- **Syntax highlighting** for widely used languages. Which languages is an open
+  question and will be decided as it goes — this is a continuous process rather
+  than a single release. Note the constraint from the TextKit 2 choice: colouring
+  must go through `NSTextContentStorage` attributes or an
+  `NSTextLayoutManager` rendering-attributes pass, not the TextKit 1
+  `addTemporaryAttribute` route.
+- **Print and print preview.** `NSDocument` already routes ⌘P to
+  `printDocument(_:)`; the work is an `NSPrintOperation` over a print-only text
+  view (the on-screen one is sized for the window, not the paper), plus page
+  headers and the standard print panel accessory.
+
 ## Notes and limitations
 
 - **Tabs always.** `tabbingMode = .preferred` deliberately overrides System

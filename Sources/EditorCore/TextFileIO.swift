@@ -135,9 +135,13 @@ public enum TextFileIO {
     /// LF half of one. Doing this at Character level looks right and silently
     /// leaves carriage returns in the user's file.
     static func normaliseToLF(_ text: String) -> String {
-        let bytes = Array(text.utf8)
-        guard bytes.contains(cr) else { return text }
+        // Test before allocating. text.utf8 is a lazy view, so this scans without
+        // materialising anything; building the array first cost a full copy of
+        // every LF document -- which is most of them, on every open and, once
+        // autosave lands, on a timer.
+        guard text.utf8.contains(cr) else { return text }
 
+        let bytes = Array(text.utf8)
         var out: [UInt8] = []
         out.reserveCapacity(bytes.count)
         var index = 0
@@ -157,6 +161,10 @@ public enum TextFileIO {
     /// The inverse of `normaliseToLF`, and byte-level for the same reason.
     static func expand(_ text: String, to lineEnding: LineEnding) -> String {
         guard lineEnding != .lf else { return text }
+        // Nothing to expand in a single-line document, and the common case for a
+        // CRLF file that has not been edited yet.
+        guard text.utf8.contains(lf) else { return text }
+
         let replacement = Array(lineEnding.rawValue.utf8)
 
         var out: [UInt8] = []
