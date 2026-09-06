@@ -54,9 +54,36 @@ final class TextDocument: NSDocument {
         storage.decoded = TextFileIO.decode(data)
     }
 
+    /// Which kind of save is in flight, so `data(ofType:)` can tell an explicit
+    /// save from a timer.
+    ///
+    /// NSDocument.h says to do exactly this rather than consulting
+    /// +autosavesInPlace: "You should instead use the NSSaveOperationType
+    /// parameter passed to your overrides of -save... and -write... methods."
+    private var currentSaveOperation: NSDocument.SaveOperationType?
+
+    override func save(
+        to url: URL,
+        ofType typeName: String,
+        for saveOperation: NSDocument.SaveOperationType,
+        completionHandler: @escaping (Error?) -> Void
+    ) {
+        currentSaveOperation = saveOperation
+        super.save(to: url, ofType: typeName, for: saveOperation) { [weak self] error in
+            self?.currentSaveOperation = nil
+            completionHandler(error)
+        }
+    }
+
     override func data(ofType typeName: String) throws -> Data {
         if let editor = windowControllers.first?.contentViewController as? EditorViewController {
-            editor.commitTextToDocument()
+            // Breaking undo coalescing is right at a save the user asked for and
+            // wrong on a timer. Autosave fires mid-typing, so doing it there
+            // closes the typing undo group at an arbitrary wall-clock moment:
+            // the next Undo then reverts back to whenever the timer happened to
+            // fire rather than to the last word.
+            let isAutosave = currentSaveOperation?.isAutosave ?? false
+            editor.commitTextToDocument(breakingUndoCoalescing: !isAutosave)
         }
         return TextFileIO.encode(storage.decoded)
     }
@@ -71,5 +98,21 @@ final class TextDocument: NSDocument {
         savePanel.allowsOtherFileTypes = true
         savePanel.isExtensionHidden = false
         return true
+    }
+}
+
+extension NSDocument.SaveOperationType {
+    /// True for the three operations AppKit drives itself rather than the user.
+    ///
+    /// `.autosaveOperation` is the deprecated spelling of
+    /// `.autosaveElsewhereOperation` and shares its raw value, so naming it here
+    /// as well would be a duplicate case rather than extra coverage.
+    var isAutosave: Bool {
+        switch self {
+        case .autosaveElsewhereOperation, .autosaveInPlaceOperation, .autosaveAsOperation:
+            true
+        default:
+            false
+        }
     }
 }

@@ -145,9 +145,14 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
 
     /// Pulls the current text back into the document. Called on the save path
     /// rather than on every keystroke, so typing does not copy the whole string.
-    func commitTextToDocument() {
-        // Close any in-flight typing undo group before the save boundary.
-        textView.breakUndoCoalescing()
+    ///
+    /// `breakingUndoCoalescing` is false for autosave. Closing the typing undo
+    /// group is right at a boundary the user chose and wrong on a timer, where
+    /// it would chop undo history at arbitrary wall-clock moments.
+    func commitTextToDocument(breakingUndoCoalescing: Bool = true) {
+        if breakingUndoCoalescing {
+            textView.breakUndoCoalescing()
+        }
         document?.text = textView.string
     }
 
