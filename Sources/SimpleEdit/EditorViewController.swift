@@ -157,15 +157,25 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
     @objc func minifyJSON(_ sender: Any?) { runJSON(.minify) }
     @objc func validateJSON(_ sender: Any?) { runJSON(.validate) }
 
+    private static let utf8BOM = Data([0xEF, 0xBB, 0xBF])
+
     private func runJSON(_ mode: JSONMode) {
-        let source = textView.string
+        // Work in bytes. The helper wants UTF-8 anyway, and slicing a BOM off
+        // Data costs nothing where dropping a Character off a String copied the
+        // whole document.
+        let source = Data(textView.string.utf8)
 
         // Go's scanner treats a BOM as an invalid character rather than
         // whitespace, so strip it here and put it back on the way out.
-        let hadBOM = source.hasPrefix("\u{FEFF}")
-        let body = hadBOM ? String(source.dropFirst()) : source
+        let hadBOM = source.starts(with: Self.utf8BOM)
+        let body = hadBOM ? source.dropFirst(Self.utf8BOM.count) : source
 
-        guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        // Byte-level whitespace rather than trimmingCharacters, which allocated
+        // a second full copy of the document purely to test it for emptiness.
+        // A document of only non-ASCII whitespace now reaches the helper and
+        // comes back as a syntax error rather than "nothing to format", which
+        // is the more accurate of the two answers.
+        guard !body.allSatisfy(\.isJSONWhitespace) else {
             presentMessage("Nothing to format", detail: "This document is empty.")
             return
         }
@@ -178,7 +188,9 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
             }
             replaceEntireDocument(with: hadBOM ? "\u{FEFF}" + result : result)
         } catch let error as JSONToolError {
-            present(error, in: body, bomOffset: hadBOM ? 1 : 0)
+            // Decode back to a String only here. The offset mapping needs one,
+            // and this is the rare path.
+            present(error, in: String(decoding: body, as: UTF8.self), bomOffset: hadBOM ? 1 : 0)
         } catch {
             presentMessage("Could not run the JSON helper", detail: error.localizedDescription)
         }
