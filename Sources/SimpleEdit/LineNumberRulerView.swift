@@ -10,12 +10,24 @@ final class LineNumberRulerView: NSRulerView {
 
     private weak var textView: NSTextView?
 
-    /// Above this size the O(n) line-start scan stops being worth it, and the
-    /// gutter goes blank rather than making typing lurch.
+    /// Above this size the gutter goes blank rather than making typing lurch.
     ///
-    /// This is compared against UTF-16 code units, which is what LineIndex
-    /// counts. The v1.0 name said "bytes" and was wrong by up to a factor of 3.
-    private static let maximumDocumentLength = 8 * 1024 * 1024
+    /// Compared against UTF-16 code units, which is what LineIndex counts. The
+    /// v1.0 name said "bytes" and was wrong by up to a factor of 3.
+    ///
+    /// 8 MB was the v1.0 value, chosen when the scan ran on every keystroke and
+    /// made one Foundation call per line. Both of those are gone: the index is
+    /// rebuilt at most once per frame and only after an edit, and the scan is a
+    /// single pass over utf16. Measured on a 13.9 MB, 400k-line file, the new
+    /// scan takes 43 ms against the old one's 161 ms -- so the old ceiling was
+    /// four times too cautious for code that got four times faster.
+    ///
+    /// 64 MB is a guard against wedging the UI, not a considered editing limit;
+    /// NSTextView itself is unpleasant well before it. Scrolling and reading
+    /// cost nothing at any size, because a fresh index is never rebuilt. Typing
+    /// into a file this large still costs one rescan per frame, which is the
+    /// thing an incremental index would fix if it ever becomes worth doing.
+    private static let maximumDocumentLength = 64 * 1024 * 1024
 
     private var lineIndex = LineIndexCache(maximumLength: maximumDocumentLength)
 
