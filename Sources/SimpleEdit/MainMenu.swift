@@ -68,6 +68,17 @@ enum MainMenu {
         menu.item("Save", #selector(NSDocument.save(_:)), "s")
         menu.item("Save As…", #selector(NSDocument.saveAs(_:)), "S")
         menu.item("Revert to Saved", #selector(NSDocument.revertToSaved(_:)))
+
+        menu.addItem(.separator())
+        // Without these, ⌘P does nothing at all: NSDocument implements printing,
+        // but nothing routes to it until a menu item carries the selector.
+        // ⇧⌘P is free here -- Save As is ⇧⌘S.
+        menu.item("Page Setup…", #selector(NSDocument.runPageLayout(_:)), "P", [.command, .shift])
+        menu.item("Print…", #selector(NSDocument.printDocument(_:)), "p")
+        // Swift spells this saveToPDF(_:); the selector it emits is still
+        // saveDocumentToPDF:, the same rename that turns saveDocument: into
+        // save(_:). Writing the ObjC name here is a compile error.
+        menu.item("Export as PDF…", #selector(NSDocument.saveToPDF(_:)))
         return menu
     }
 
@@ -150,6 +161,17 @@ enum MainMenu {
             "w",
             [.command, .option]
         )
+        menu.addItem(.separator())
+
+        let appearance = NSMenu(title: "Appearance")
+        for setting in AppearanceSetting.allCases {
+            appearance.item(
+                setting.title,
+                #selector(AppDelegate.changeAppearance(_:))
+            ).tag = setting.tag
+        }
+        menu.addItem(submenu: appearance)
+
         menu.addItem(.separator())
         // AppKit retitles this to "Exit Full Screen" by itself.
         menu.item(
