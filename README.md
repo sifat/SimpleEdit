@@ -1,8 +1,14 @@
 # SimpleEdit
 
 A small native macOS text editor. Swift + AppKit + `NSDocument`, built with SwiftPM,
-wrapped into a `.app` by a shell script. No Electron, no xcodeproj, no xib, no
-third-party dependencies.
+wrapped into a `.app` by a shell script. No Electron, no xcodeproj, no xib.
+
+Two third-party dependencies, both pinned to exact versions and both for syntax
+highlighting: [`swift-tree-sitter`](https://github.com/tree-sitter/swift-tree-sitter)
+and [`tree-sitter-html`](https://github.com/tree-sitter/tree-sitter-html). The
+grammar's highlight query is vendored into `Resources/Queries/` under its MIT
+licence — see `Resources/Queries/html/SOURCE.md` for why, and for how to keep it in
+step with upstream.
 
 If you have come to macOS from Linux and miss **gedit** — a plain editor that opens
 instantly, edits a file, and gets out of the way — this is that, built the way a Mac
@@ -57,9 +63,14 @@ open build/SimpleEdit.app
 Then drag `build/SimpleEdit.app` to `/Applications`.
 
 ```sh
-swift test                                          # EditorCore unit tests
+swift test                                          # EditorCore + SyntaxCore unit tests
 go test ./tools/jsonfmt                             # JSON golden tests
 ```
+
+`Package.resolved` is committed deliberately: it is the only record of which
+grammar commit a given build shipped. The first resolve is slow — `swift-tree-sitter`
+carries a git submodule (a Swift grammar this project never uses) that SwiftPM
+clones anyway.
 
 ### Debugging
 

@@ -54,6 +54,21 @@ cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 # Regenerate with: xcrun swift tools/appicon/make-icon.swift
 [ -f "$ROOT/Resources/AppIcon.icns" ] && cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 
+# Syntax-highlighting queries. Vendored under Resources/Queries rather than read
+# from the grammar's own SwiftPM resource bundle -- see
+# Resources/Queries/html/SOURCE.md. Copying the whole tree means adding a
+# language needs no change here. This must land BEFORE codesign, which seals
+# Contents/Resources into _CodeSignature/CodeResources.
+cp -R "$ROOT/Resources/Queries" "$APP/Contents/Resources/"
+# set -eu already fails on a missing source directory; this catches the subtler
+# case where the copy "succeeds" but the file we actually load is not there.
+# Without it the failure surfaces only at runtime, as a document that silently
+# refuses to highlight.
+[ -f "$APP/Contents/Resources/Queries/html/highlights.scm" ] || {
+    echo "queries missing from bundle" >&2
+    exit 1
+}
+
 if [ "$UNIVERSAL" -eq 1 ]; then
     lipo -create "$STAGE/$APP_NAME.arm64" "$STAGE/$APP_NAME.x86_64" -output "$APP/Contents/MacOS/$APP_NAME"
     lipo -create "$STAGE/jsonfmt.arm64"   "$STAGE/jsonfmt.x86_64"   -output "$APP/Contents/MacOS/jsonfmt"
