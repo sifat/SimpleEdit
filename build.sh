@@ -64,10 +64,13 @@ cp -R "$ROOT/Resources/Queries" "$APP/Contents/Resources/"
 # case where the copy "succeeds" but the file we actually load is not there.
 # Without it the failure surfaces only at runtime, as a document that silently
 # refuses to highlight.
-[ -f "$APP/Contents/Resources/Queries/html/highlights.scm" ] || {
-    echo "queries missing from bundle" >&2
-    exit 1
-}
+for dir in "$ROOT"/Resources/Queries/*/; do
+    language=$(basename "$dir")
+    [ -f "$APP/Contents/Resources/Queries/$language/highlights.scm" ] || {
+        echo "queries missing from bundle: $language" >&2
+        exit 1
+    }
+done
 
 if [ "$UNIVERSAL" -eq 1 ]; then
     lipo -create "$STAGE/$APP_NAME.arm64" "$STAGE/$APP_NAME.x86_64" -output "$APP/Contents/MacOS/$APP_NAME"
