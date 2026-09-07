@@ -10,7 +10,20 @@ public struct LineIndex: Sendable, Equatable {
     /// Always non-empty: a document with no newlines is one line starting at 0.
     public let lineStarts: [Int]
 
+    /// Total length of the indexed text, in UTF-16 code units.
+    public let length: Int
+
     public var lineCount: Int { lineStarts.count }
+
+    /// True when the document ends with a newline, so its last line is empty.
+    ///
+    /// Worth naming because that line is invisible to the layout system: TextKit
+    /// 2 produces no layout fragment for it, so a ruler walking fragments will
+    /// never be handed anything to label, and the caret ends up sitting on an
+    /// unnumbered line. Whoever draws the numbers has to place this one itself.
+    public var hasTrailingEmptyLine: Bool {
+        lineStarts.count > 1 && lineStarts[lineStarts.count - 1] == length
+    }
 
     private static let lineFeed: UInt16 = 0x000A
 
@@ -35,6 +48,7 @@ public struct LineIndex: Sendable, Equatable {
             if unit == Self.lineFeed { starts.append(offset) }
         }
         lineStarts = starts
+        length = offset
     }
 
     /// Which 1-based line contains this UTF-16 offset.
