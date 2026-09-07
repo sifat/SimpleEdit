@@ -26,6 +26,13 @@ enum SyntaxTheme {
         case .comment: .systemGreen
         case .constant: .systemTeal
         case .punctuation: .tertiaryLabelColor
+        // CSS. `property` shares blue with `tag` on purpose: a CSS selector is
+        // the same sort of thing an HTML tag name is, and the two never appear
+        // in the same position, so a second blue costs nothing and one fewer
+        // colour is easier to read.
+        case .keyword: .systemPink
+        case .property: .systemBlue
+        case .function: .systemIndigo
         case .invalid: .systemOrange
         }
     }

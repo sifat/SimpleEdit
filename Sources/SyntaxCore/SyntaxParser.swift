@@ -1,5 +1,6 @@
 import Foundation
 import SwiftTreeSitter
+import TreeSitterCSS
 import TreeSitterHTML
 
 /// Turns source text into tokens. One per document.
@@ -43,8 +44,22 @@ public final class SyntaxParser {
             return .empty
         }
 
-        let cursor = query.execute(node: root, in: tree)
-        let tokens = cursor
+        // Predicates are resolved, not ignored. tree-sitter parses `#match?`
+        // and friends but deliberately does not evaluate them -- it hands them
+        // to the caller. Skipping that step is not a small loss of fidelity, it
+        // inverts the predicate: the CSS query says
+        //
+        //     ((plain_value) @variable (#match? @variable "^--"))
+        //
+        // and an unevaluated predicate means EVERY plain value is captured as a
+        // variable, so `block` in `display: block` would be coloured. The HTML
+        // query carries no predicates, so this costs it nothing.
+        //
+        // Context(string:) wraps a caching text provider, so a value read for
+        // one predicate is not sliced out of the source again for the next.
+        let matches = query.execute(node: root, in: tree)
+            .resolve(with: Predicate.Context(string: source))
+        let tokens = matches
             .flatMap(\.captures)
             .compactMap { capture -> SyntaxToken? in
                 guard let name = capture.name,
@@ -67,6 +82,7 @@ public final class SyntaxParser {
         switch language {
         case .plain: return nil
         case .html: tsLanguage = tree_sitter_html()
+        case .css: tsLanguage = tree_sitter_css()
         }
 
         return try? LanguageConfiguration(

@@ -8,11 +8,13 @@ import Foundation
 public enum SyntaxLanguage: String, Sendable, CaseIterable {
     case plain
     case html
+    case css
 
     public var title: String {
         switch self {
         case .plain: "None"
         case .html: "HTML"
+        case .css: "CSS"
         }
     }
 
@@ -23,6 +25,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         switch self {
         case .plain: 0
         case .html: 1
+        case .css: 2
         }
     }
 
@@ -36,6 +39,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         switch self {
         case .plain: []
         case .html: ["html", "htm"]
+        case .css: ["css"]
         }
     }
 
@@ -57,6 +61,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         switch self {
         case .plain: nil
         case .html: "html"
+        case .css: "css"
         }
     }
 }

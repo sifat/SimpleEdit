@@ -13,6 +13,9 @@ public enum SyntaxTokenKind: String, Sendable, CaseIterable {
     case comment
     case constant
     case punctuation
+    case keyword
+    case property
+    case function
     case invalid
 
     /// tree-sitter capture names are dotted and hierarchical, and the convention
@@ -34,10 +37,26 @@ public enum SyntaxTokenKind: String, Sendable, CaseIterable {
         return nil
     }
 
-    /// The HTML grammar's whole capture set is the first six entries plus
-    /// `punctuation.bracket`, which falls back to `punctuation`. Adding a
-    /// language means adding names here, not editing any `.scm`.
+    /// The union of every vendored query's capture names. Adding a language
+    /// means adding names here, not editing any `.scm` -- which is what keeps
+    /// the vendored files byte-for-byte diffable against upstream.
+    ///
+    /// Several names deliberately collapse onto a kind that already exists
+    /// rather than earning one of their own:
+    ///
+    /// - `variable` is CSS's name for a custom property (`--brand`), which this
+    ///   app has no reason to distinguish from any other property. It also
+    ///   removes an ordering hazard: `--brand` is captured as *both* `property`
+    ///   and `variable`, and two captures over one range with two different
+    ///   kinds would leave the winner to `SyntaxTokenList`'s tie-break, which is
+    ///   arbitrary. Mapping them together makes the duplicate identical, so it
+    ///   collapses deterministically.
+    /// - `number` and `type` are both literal values in CSS -- `10` and the `px`
+    ///   after it -- so both are `constant`, and `10px` colours as one thing.
+    /// - `operator` is CSS's `>`, `~`, `+` and friends. They are punctuation
+    ///   that happens to mean something; nothing is gained by a separate colour.
     private static let byCaptureName: [String: SyntaxTokenKind] = [
+        // HTML
         "tag": .tag,
         "tag.error": .invalid,
         "attribute": .attribute,
@@ -45,5 +64,13 @@ public enum SyntaxTokenKind: String, Sendable, CaseIterable {
         "comment": .comment,
         "constant": .constant,
         "punctuation": .punctuation,
+        // CSS
+        "keyword": .keyword,
+        "property": .property,
+        "variable": .property,
+        "function": .function,
+        "number": .constant,
+        "type": .constant,
+        "operator": .punctuation,
     ]
 }
