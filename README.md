@@ -259,6 +259,41 @@ Nothing else is planned for the next release.
   TextKit 1 if a custom find bar with highlight-all is ever needed
   (`addTemporaryAttribute` is TextKit 1 only) — that also means switching
   `LineNumberRulerView` to `NSLayoutManager.enumerateLineFragments`.
+- **TextKit 2 rendering attributes work, but only if you never invalidate them.**
+  Syntax highlighting colours text through
+  `NSTextLayoutManager.renderingAttributesValidator` rather than by mutating
+  `NSTextStorage`, so colour never reaches undo, the edited flag or the save path.
+  That approach has a bad public reputation — Apple DTS confirmed on Developer
+  Forums thread 817471 that `addRenderingAttribute` plus `invalidateLayout` stores
+  attributes without repainting, FB9692714 has been open since 2022, and STTextView
+  abandoned the API — so it was measured before being adopted. Findings, from a
+  throwaway spike on a 200-line file:
+
+  - The validator fires reliably. Colour is present on first paint with no
+    keystroke, scroll or resize, and after an edit **every affected fragment
+    re-validates, including ones far below the edit**. 147 validator calls on open,
+    about 5 for a local edit.
+  - **`invalidateRenderingAttributes(for:)` destroys colour and never asks for it
+    back.** The header says enumeration "will skip the invalidated range", and that
+    is exactly what happens — call it and the text goes black, permanently, through
+    edits and even a window resize. Every escalation built on it made things worse
+    than doing nothing. This is very likely what the public reports are actually
+    hitting: the instinct is to invalidate, and invalidating is the bug.
+  - So the rule is: **set attributes from the validator, and never invalidate
+    them.** Let re-layout drop them and re-ask.
+  - Dynamic `NSColor`s resolve at draw time inside rendering attributes, so an
+    appearance change recolours correctly with no invalidation and no observer.
+    Semantic and `system*` colours are therefore free.
+  - The validator runs on the main thread, synchronously during layout, at 5–11 µs
+    mean and 60 µs worst case per fragment. It must stay a pure lookup: no parsing,
+    no `ensureLayout`, no `needsDisplay`.
+  - Saving a coloured document produces a byte-identical file.
+
+  What is *not* solved: changing the colour of already-laid-out text when the text
+  itself has not changed (swapping one theme for another). Neither doing nothing nor
+  `invalidateLayout` repaints it. That does not affect appearance switching, which
+  dynamic colours handle, so it only matters if user-selectable themes are ever added.
+
 - **Find bar.** Every Find menu item is tagged with an `NSTextFinder.Action` raw
   value and targets First Responder. Replacing the stock bar with a custom one is a
   selector change on those items, with no other menu edits.
