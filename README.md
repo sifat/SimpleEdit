@@ -296,6 +296,14 @@ toggle, printing (5 correctly paginated pages from a 122-line file, verified thr
 PDF export), and autosave recovery — an unsaved edit survives `kill -9` while the
 file on disk stays byte-identical.
 
+Syntax highlighting was checked the same way, in a running app rather than only
+under test: all four languages on real files, a single page carrying inline
+`<style>` and `<script>` with all three grammars colouring at once, colour following
+live typing, Dark mode re-resolving every colour with no code involved, a saved file
+byte-identical to what was typed, and opening then closing a highlighted document
+raising no unsaved-changes sheet — the last two being the properties the whole
+rendering-attributes design exists to protect.
+
 **Seen once, not reproduced:** ⌘W closed a tab other than the selected one. It
 happened during scripted UI testing, with the intended tab selected and its title
 in the title bar, so it may equally have been an artefact of synthesised
