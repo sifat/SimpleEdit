@@ -36,6 +36,32 @@ struct LineIndexTests {
         #expect(LineIndex("🎉\n🎉", maximumLength: cap)?.lineStarts == [0, 3])
     }
 
+    /// The empty last line a trailing newline opens is invisible to TextKit 2 --
+    /// it lays out no fragment for it -- so the gutter has to know the line is
+    /// there in order to number it. Without this the caret sat on an unnumbered
+    /// line every time a file ended the way nearly every text file ends.
+    @Test("A trailing newline is reported as a trailing empty line")
+    func trailingEmptyLine() throws {
+        #expect(try #require(LineIndex("alpha\nbravo\n", maximumLength: cap)).hasTrailingEmptyLine)
+        #expect(try #require(LineIndex("\n", maximumLength: cap)).hasTrailingEmptyLine)
+    }
+
+    @Test("A document not ending in a newline has no trailing empty line")
+    func noTrailingEmptyLine() throws {
+        #expect(try #require(LineIndex("alpha\nbravo", maximumLength: cap)).hasTrailingEmptyLine == false)
+        #expect(try #require(LineIndex("alpha", maximumLength: cap)).hasTrailingEmptyLine == false)
+        // The empty document is one line, not a trailing empty one -- the gutter
+        // draws that case separately.
+        #expect(try #require(LineIndex("", maximumLength: cap)).hasTrailingEmptyLine == false)
+    }
+
+    @Test("Length counts UTF-16 units, not Characters")
+    func length() throws {
+        #expect(try #require(LineIndex("abc", maximumLength: cap)).length == 3)
+        #expect(try #require(LineIndex("🎉", maximumLength: cap)).length == 2)
+        #expect(try #require(LineIndex("", maximumLength: cap)).length == 0)
+    }
+
     @Test("Consecutive newlines each open a line")
     func blankLines() {
         #expect(LineIndex("\n\n\n", maximumLength: cap)?.lineStarts == [0, 1, 2, 3])
