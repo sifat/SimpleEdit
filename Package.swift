@@ -17,6 +17,12 @@ let package = Package(
         // 2026), so `from:` silently resolves to the older, less capable
         // release. CotEditor pins the same way, for the same reason.
         .package(url: "https://github.com/tree-sitter/swift-tree-sitter", exact: "0.10.0"),
+        // The C library itself, already present transitively via swift-tree-sitter
+        // and pinned here to the exact version that was already being resolved,
+        // so declaring it changes no other pin. SyntaxCore needs it directly
+        // because the hot query loop is driven through the C API -- see
+        // SyntaxParser.
+        .package(url: "https://github.com/tree-sitter/tree-sitter", exact: "0.25.10"),
         .package(url: "https://github.com/tree-sitter/tree-sitter-html", exact: "0.23.2"),
         // 0.23.2 rather than the newer 0.25.0 on purpose: 0.25.0's manifest
         // decides whether to compile the external scanner with a RELATIVE
@@ -56,6 +62,7 @@ let package = Package(
             name: "SyntaxCore",
             dependencies: [
                 .product(name: "SwiftTreeSitter", package: "swift-tree-sitter"),
+                .product(name: "TreeSitter", package: "tree-sitter"),
                 .product(name: "TreeSitterHTML", package: "tree-sitter-html"),
                 .product(name: "TreeSitterCSS", package: "tree-sitter-css"),
                 .product(name: "TreeSitterJavaScript", package: "tree-sitter-javascript"),

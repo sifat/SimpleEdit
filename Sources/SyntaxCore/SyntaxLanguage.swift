@@ -70,32 +70,49 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
 
     /// Documents longer than this, in UTF-16 units, are not highlighted at all.
     ///
-    /// Per language because the cost is per language, and measured rather than
-    /// guessed. Tokenising runs synchronously on the keystroke path, so these
-    /// are chosen to hold the worst case near 60-80 ms:
+    /// **A byte cap does not bound the worst case, and cannot.** These numbers
+    /// buy an ordinary-file guarantee, not a guarantee:
     ///
-    ///     JavaScript, library code       0.72 ms/KB
-    ///     CSS, real stylesheets          0.95 ms/KB
-    ///     CSS, synthetic dense           1.28 ms/KB
-    ///     JavaScript, dense component    2.31 ms/KB
-    ///     HTML, tag-dense markup         2.43 ms/KB
+    ///     JavaScript, library code       0.33 ms/KB
+    ///     CSS, real stylesheets          0.55 ms/KB
+    ///     JavaScript, dense component    0.95 ms/KB
+    ///     HTML, markup with inline js    1.06 ms/KB
+    ///     TypeScript, dense              1.07 ms/KB
+    ///     HTML, tag-dense markup         1.28 ms/KB
     ///
-    /// The spread is three-fold WITHIN a single language, and it is about token
-    /// density rather than file size: the cost is dominated by per-capture
-    /// allocation inside swift-tree-sitter, so what matters is how many
-    /// captures a KB produces. A file of long prose comments is cheap; a file
-    /// of short chained calls or of tiny nested tags is not.
+    /// That table measures **capture density**, which is what the per-capture
+    /// cost scales with. It is not what sets the worst case. The worst case is
+    /// set by nesting depth and unbalanced brackets, both of which are
+    /// QUADRATIC, so cost per KB is not a property of a language at all -- it
+    /// is a property of the text. Measured at these caps:
     ///
-    /// CSS is the outlier that keeps 64 KB, and it earns it: real stylesheets
-    /// produce about half the captures per KB that dense markup or component
-    /// JavaScript do.
+    ///     HTML, 21845 unclosed `<b>` at 32 KB          429 ms
+    ///     CSS, nested `:is(` at 64 KB                 2861 ms
+    ///     TypeScript, ONE stray `(` in a 32 KB file     77 ms
+    ///     JavaScript, ONE stray `(` in a 32 KB file     40 ms
+    ///
+    /// The third and fourth are the ones that matter, because they are not
+    /// pathological input -- they are an ordinary file halfway through being
+    /// typed. Doubling these caps was tried and reverted: it multiplied every
+    /// one of those numbers by about four (HTML 429 -> 1726 ms, CSS 2861 ->
+    /// 11436 ms) while buying nothing, because the C query loop that made
+    /// realistic files 2-3x faster is worth about 1.05x on input shaped like
+    /// this. Capture density is cheap now; nesting was never the part that got
+    /// faster.
+    ///
+    /// So the honest statement is: these caps keep *typical* files inside a
+    /// frame or two, and a hostile or half-typed file can still stall the main
+    /// thread for a second or more. The fix for that is a time budget on both
+    /// the parse and the query -- bounding the work rather than the input --
+    /// not a smaller number here.
+    ///
+    /// CSS gets the larger cap because real stylesheets produce about a third
+    /// the captures per KB that dense markup does.
     ///
     /// Injections do NOT make HTML worse per KB, which is worth stating because
     /// it is the opposite of what one expects: an inline script is less
     /// capture-dense than the markup around it, so a page with a large
     /// `<script>` measures *cheaper* per KB than the same page of pure markup.
-    /// HTML's cap is 32 KB because of its markup, not because of what it
-    /// embeds.
     public var maximumLength: Int {
         switch self {
         case .plain: 0
