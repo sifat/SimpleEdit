@@ -136,6 +136,19 @@ final class LineNumberRulerView: NSRulerView {
             .foregroundColor: NSColor.secondaryLabelColor,
         ]
 
+        // An empty document has no text layout fragment at all -- TextKit 2 lays
+        // out nothing when there is nothing to lay out -- so the enumeration
+        // below never runs a single time and the caret sits on an unnumbered
+        // line 1 until the first keystroke. Draw that line directly.
+        //
+        // Asked through documentRange rather than textView.string because
+        // reading `string` copies the whole document, which is exactly what the
+        // index cache's autoclosure exists to avoid on every frame.
+        if contentManager.documentRange.isEmpty {
+            draw(lineNumber: 1, atFragmentTop: 0, in: textView, attributes: attributes)
+            return
+        }
+
         // Deliberately NOT .ensuresLayout. Forcing TextKit 2 to lay out from inside
         // the ruler's draw pass re-enters the layout system while the text view is
         // mid-draw, and the text then never paints. Only ever read fragments the
@@ -150,18 +163,33 @@ final class LineNumberRulerView: NSRulerView {
             let offset = contentManager.offset(from: contentManager.documentRange.location, to: origin)
             let number = index.lineNumber(containing: offset)
 
-            let frame = fragment.layoutFragmentFrame
-            let inTextView = NSPoint(x: 0, y: frame.minY + textView.textContainerInset.height)
-            let y = convert(inTextView, from: textView).y
-
-            let label = "\(number)" as NSString
-            let size = label.size(withAttributes: attributes)
-            label.draw(
-                at: NSPoint(x: bounds.maxX - size.width - horizontalPadding, y: y),
-                withAttributes: attributes
+            draw(
+                lineNumber: number,
+                atFragmentTop: fragment.layoutFragmentFrame.minY,
+                in: textView,
+                attributes: attributes
             )
             return true
         }
+    }
+
+    /// Draws one right-aligned number level with a fragment whose top edge is at
+    /// `fragmentTop` in the text view's coordinates.
+    private func draw(
+        lineNumber: Int,
+        atFragmentTop fragmentTop: CGFloat,
+        in textView: NSTextView,
+        attributes: [NSAttributedString.Key: Any]
+    ) {
+        let inTextView = NSPoint(x: 0, y: fragmentTop + textView.textContainerInset.height)
+        let y = convert(inTextView, from: textView).y
+
+        let label = "\(lineNumber)" as NSString
+        let size = label.size(withAttributes: attributes)
+        label.draw(
+            at: NSPoint(x: bounds.maxX - size.width - horizontalPadding, y: y),
+            withAttributes: attributes
+        )
     }
 
     // MARK: - Gutter width
