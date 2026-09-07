@@ -112,10 +112,28 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
     private func loadDocumentTextIfNeeded() {
         guard !didLoadDocumentText, let document else { return }
         didLoadDocumentText = true
+        applyDocumentText(document.text)
+    }
 
+    /// Pulls the document's text into the view again, discarding what is on
+    /// screen.
+    ///
+    /// Revert to Saved needs this. NSDocument's revert replaces the document's
+    /// storage and has no idea a view is showing the old text, and
+    /// loadDocumentTextIfNeeded refuses to run twice -- so before this existed
+    /// the view kept the stale text, and because data(ofType:) commits
+    /// textView.string on the way out, the next save wrote that stale text
+    /// straight back over the file the user had just reverted.
+    func reloadDocumentText() {
+        guard let document else { return }
+        didLoadDocumentText = true
+        applyDocumentText(document.text)
+    }
+
+    private func applyDocumentText(_ text: String) {
         // Assigning `string` directly does not post NSText.didChangeNotification
         // and registers no undo, so opening a file does not mark it edited.
-        textView.string = document.text
+        textView.string = text
 
         let longest = TextMetrics.longestLineLength(
             in: textView.string,
@@ -125,6 +143,14 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
             wrapsLines = false
             applyWrapping()
         }
+        documentTextDidArrive()
+    }
+
+    /// Everything that has to happen when the whole text changes at once rather
+    /// than through editing. One place, because assigning `string` posts no
+    /// notification, so each of these consumers has to be told by hand and it is
+    /// easy to add a third and forget one.
+    private func documentTextDidArrive() {
         ruler.documentDidLoad()
     }
 
@@ -214,7 +240,7 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
         storage.endEditing()
         textView.didChangeText()
 
-        ruler.documentDidLoad()
+        documentTextDidArrive()
     }
 
     private func present(_ error: JSONToolError, in body: String, bomOffset: Int) {
