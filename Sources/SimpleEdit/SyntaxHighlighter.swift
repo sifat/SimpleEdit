@@ -13,24 +13,21 @@ final class SyntaxHighlighter {
 
     private weak var textView: NSTextView?
     private let parser: SyntaxParser
+    private let language: SyntaxLanguage
     private var tokens: SyntaxTokenList = .empty
 
-    /// Above this the document is not highlighted at all.
-    ///
-    /// 64 KB is small, and it is small because it was measured rather than
-    /// guessed. Tokenising costs about **0.9 ms per KB** -- 71 ms for a real
-    /// 77 KB stylesheet, 660 ms for 500 KB -- and because the parse is
-    /// synchronous on the edit path, that is per keystroke. 64 KB keeps the
-    /// worst case near 60 ms and an ordinary file (the median here is under
-    /// 2 KB) inside a single frame.
+    /// The size cap lives on `SyntaxLanguage`, because it differs per language
+    /// and because it is a measured number that belongs next to the other facts
+    /// about a grammar rather than in the AppKit layer. See the comment there
+    /// for what was measured; the short version is that tokenising is
+    /// synchronous on the keystroke path, so the cap is whatever keeps the
+    /// worst case near 60 ms.
     ///
     /// Almost none of that cost is tree-sitter, which parses 500 KB in 139 ms.
     /// It is swift-tree-sitter's `QueryCursor`, which allocates a name String,
     /// a `components(separatedBy:)` array and a metadata Dictionary for **every
-    /// capture** -- roughly 5 µs each, against 80,000 captures in that 500 KB
-    /// file. Raising this cap means going around that loop with the C query
-    /// API, not tuning anything here.
-    private static let maximumLength = 64 * 1024
+    /// capture**. Raising these caps means going around that loop with the C
+    /// query API, not tuning anything here.
 
     init?(language: SyntaxLanguage, textView: NSTextView) {
         guard let queriesRoot = Bundle.main.resourceURL?
@@ -47,6 +44,7 @@ final class SyntaxHighlighter {
         }
 
         self.parser = parser
+        self.language = language
         self.textView = textView
         installValidator()
     }
@@ -144,7 +142,7 @@ final class SyntaxHighlighter {
     private func reparse() {
         guard let textView else { return }
         let source = textView.string
-        guard (source as NSString).length <= Self.maximumLength else {
+        guard (source as NSString).length <= language.maximumLength else {
             tokens = .empty
             return
         }

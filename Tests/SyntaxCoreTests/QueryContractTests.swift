@@ -24,6 +24,21 @@ struct QueryContractTests {
             "attribute", "property", "function", "variable", "keyword",
             "number", "type", "punctuation.delimiter",
         ],
+        .javascript: [
+            "comment", "constant", "constant.builtin", "constructor", "embedded",
+            "function", "function.builtin", "function.method", "keyword", "number",
+            "operator", "property", "punctuation.bracket", "punctuation.delimiter",
+            "punctuation.special", "string", "string.special", "variable",
+            "variable.builtin",
+        ],
+    ]
+
+    /// Captures a language emits and this app deliberately does not colour.
+    /// Written down per language so that "unmapped" stays a decision with a
+    /// reason -- `SyntaxTokenKind.overrides` carries the reasons -- while a
+    /// capture that becomes unmapped by ACCIDENT still fails the suite.
+    private static let deliberatelyUnmapped: [SyntaxLanguage: Set<String>] = [
+        .javascript: ["variable", "variable.builtin", "constructor", "embedded"],
     ]
 
     private static func captureNames(in language: SyntaxLanguage) throws -> Set<String> {
@@ -83,15 +98,34 @@ struct QueryContractTests {
         #expect(try Self.captureNames(in: language) == Self.expectedCaptures[language])
     }
 
-    /// Every capture a query emits must map to a kind. A name that maps to
-    /// nothing is text that silently stays uncoloured.
-    @Test("Every capture in every query maps to a token kind")
+    /// Every capture a query emits must either map to a kind or be listed as
+    /// deliberately unmapped. A name that maps to nothing without being listed
+    /// is text that silently stays uncoloured.
+    @Test("Every capture in every query maps to a token kind, or is listed")
     func everyCaptureMaps() throws {
         for language in Self.expectedCaptures.keys {
-            for name in try Self.captureNames(in: language) {
+            let allowed = Self.deliberatelyUnmapped[language] ?? []
+            for name in try Self.captureNames(in: language) where !allowed.contains(name) {
                 #expect(
-                    SyntaxTokenKind(captureName: name) != nil,
+                    SyntaxTokenKind(captureName: name, in: language) != nil,
                     "unmapped capture: @\(name) in \(language.rawValue)"
+                )
+            }
+        }
+    }
+
+    /// The other half. A name listed as deliberately unmapped that has since
+    /// GAINED a mapping means the list is lying, and the next reader would
+    /// trust it.
+    @Test("Every deliberately-unmapped capture really is unmapped")
+    func unmappedListIsHonest() throws {
+        for (language, names) in Self.deliberatelyUnmapped {
+            let emitted = try Self.captureNames(in: language)
+            for name in names {
+                #expect(emitted.contains(name), "@\(name) is not emitted by \(language.rawValue)")
+                #expect(
+                    SyntaxTokenKind(captureName: name, in: language) == nil,
+                    "@\(name) is listed as unmapped but maps in \(language.rawValue)"
                 )
             }
         }
@@ -106,7 +140,9 @@ struct QueryContractTests {
         var produced: Set<SyntaxTokenKind> = []
         for language in Self.expectedCaptures.keys {
             for name in try Self.captureNames(in: language) {
-                if let kind = SyntaxTokenKind(captureName: name) { produced.insert(kind) }
+                if let kind = SyntaxTokenKind(captureName: name, in: language) {
+                    produced.insert(kind)
+                }
             }
         }
         #expect(produced == Set(SyntaxTokenKind.allCases))

@@ -38,6 +38,31 @@ struct SyntaxLanguageTests {
         #expect(SyntaxLanguage.plain.queryDirectoryName == nil)
         #expect(SyntaxLanguage.html.queryDirectoryName == "html")
         #expect(SyntaxLanguage.css.queryDirectoryName == "css")
+        #expect(SyntaxLanguage.javascript.queryDirectoryName == "javascript")
+    }
+
+    @Test("JavaScript is detected by extension, module variants included")
+    func javaScriptExtensions() {
+        #expect(SyntaxLanguage(fileExtension: "js") == .javascript)
+        #expect(SyntaxLanguage(fileExtension: "mjs") == .javascript)
+        #expect(SyntaxLanguage(fileExtension: "cjs") == .javascript)
+        #expect(SyntaxLanguage(fileExtension: "JS") == .javascript)
+        // Not jsx: that needs the grammar's separate highlights-jsx.scm, which
+        // this app does not vendor.
+        #expect(SyntaxLanguage(fileExtension: "jsx") == nil)
+    }
+
+    /// The cap is a measured number, and a language that has a grammar but no
+    /// cap would be highlighted at any size -- the failure the cap prevents.
+    @Test("Every highlighted language caps its document size")
+    func capsAreSet() {
+        for language in SyntaxLanguage.allCases where language.queryDirectoryName != nil {
+            #expect(language.maximumLength > 0, "\(language.rawValue) has no size cap")
+        }
+        #expect(SyntaxLanguage.plain.maximumLength == 0)
+        // JavaScript is denser per KB than the markup languages, so its cap is
+        // lower. If these ever match, one of them was changed without measuring.
+        #expect(SyntaxLanguage.javascript.maximumLength < SyntaxLanguage.css.maximumLength)
     }
 
     /// Two languages claiming the same extension would make detection depend on

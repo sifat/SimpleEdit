@@ -23,6 +23,16 @@ let package = Package(
         // FileManager.fileExists("src/scanner.c"), which is not resolved against
         // the dependency's own checkout. See Resources/Queries/css/SOURCE.md.
         .package(url: "https://github.com/tree-sitter/tree-sitter-css", exact: "0.23.2"),
+        // 0.23.1 is the newest JavaScript tag that is not booby-trapped. There
+        // is no 0.23.2 -- the grammars version independently. 0.25.0 carries the
+        // relative-path scanner hazard described above, and 0.23.0 is worse
+        // still: its manifest never filled in the generator's "add your external
+        // scanner here" comment, so it drops scanner.c unconditionally rather
+        // than only sometimes. highlights.scm is byte-identical between 0.23.1
+        // and 0.25.0, so the newer tag buys nothing here anyway.
+        //
+        // Note the capital S: 0.23.0 spelled the product TreeSitterJavascript.
+        .package(url: "https://github.com/tree-sitter/tree-sitter-javascript", exact: "0.23.1"),
     ],
     targets: [
         // Foundation only, no AppKit — so `swift test` can cover the parts where a
@@ -44,6 +54,7 @@ let package = Package(
                 .product(name: "SwiftTreeSitter", package: "swift-tree-sitter"),
                 .product(name: "TreeSitterHTML", package: "tree-sitter-html"),
                 .product(name: "TreeSitterCSS", package: "tree-sitter-css"),
+                .product(name: "TreeSitterJavaScript", package: "tree-sitter-javascript"),
             ],
             swiftSettings: swiftSettings
         ),

@@ -2,6 +2,7 @@ import Foundation
 import SwiftTreeSitter
 import TreeSitterCSS
 import TreeSitterHTML
+import TreeSitterJavaScript
 
 /// Turns source text into tokens. One per document.
 ///
@@ -12,6 +13,9 @@ public final class SyntaxParser {
 
     private let parser: Parser
     private let query: Query
+    /// Kept because capture names are interpreted per language: `@variable`
+    /// means a custom property in CSS and any identifier at all in JavaScript.
+    private let language: SyntaxLanguage
 
     /// Returns nil if the grammar or its query cannot be loaded, so a missing or
     /// broken query file degrades to plain text. Never traps: the query is read
@@ -31,6 +35,7 @@ public final class SyntaxParser {
 
         self.parser = parser
         self.query = highlights
+        self.language = language
     }
 
     public func tokens(for source: String) -> SyntaxTokenList {
@@ -63,7 +68,7 @@ public final class SyntaxParser {
             .flatMap(\.captures)
             .compactMap { capture -> SyntaxToken? in
                 guard let name = capture.name,
-                      let kind = SyntaxTokenKind(captureName: name)
+                      let kind = SyntaxTokenKind(captureName: name, in: self.language)
                 else { return nil }
                 // capture.range is an NSRange in UTF-16 code units, the same
                 // unit NSTextStorage uses. No conversion, by design.
@@ -83,6 +88,7 @@ public final class SyntaxParser {
         case .plain: return nil
         case .html: tsLanguage = tree_sitter_html()
         case .css: tsLanguage = tree_sitter_css()
+        case .javascript: tsLanguage = tree_sitter_javascript()
         }
 
         return try? LanguageConfiguration(
