@@ -26,8 +26,7 @@ struct QueryLoadingTests {
     }
 
     @Test("It compiles against the pinned grammar")
-    func queryCompiles() throws {
-        let configuration = try SyntaxCore.htmlConfiguration(queriesRoot: Self.queriesRoot)
-        #expect(configuration.queries[.highlights] != nil)
+    func queryCompiles() {
+        #expect(SyntaxParser(language: .html, queriesRoot: Self.queriesRoot) != nil)
     }
 }
