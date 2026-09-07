@@ -1,5 +1,6 @@
 import AppKit
 import EditorCore
+import SyntaxCore
 
 /// Owns the text view for one tab.
 ///
@@ -14,6 +15,7 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
     private var ruler: LineNumberRulerView!
 
     private var didLoadDocumentText = false
+    private var highlighter: SyntaxHighlighter?
     private(set) var wrapsLines = true
     private(set) var showsLineNumbers = true
 
@@ -152,12 +154,35 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
     /// easy to add a third and forget one.
     private func documentTextDidArrive() {
         ruler.documentDidLoad()
+        installHighlighterIfNeeded()
+        highlighter?.documentTextDidArrive()
+    }
+
+    /// Detection is by file extension: EditorDocumentController reports every
+    /// document as `public.text` so extensionless files open at all, so the
+    /// document type carries no language information by the time we get here.
+    /// An untitled document has no URL and stays plain until it is saved.
+    private func installHighlighterIfNeeded() {
+        guard highlighter == nil else { return }
+        guard let url = document?.fileURL,
+              let language = SyntaxLanguage(fileExtension: url.pathExtension)
+        else { return }
+
+        // Wrapping is force-disabled for documents with an enormous single
+        // line, which is exactly the shape -- minified HTML -- where one layout
+        // fragment spans the whole file and the validator would be handed every
+        // token in the document in a single call. Reuse that signal rather than
+        // inventing a second threshold.
+        guard wrapsLines else { return }
+
+        highlighter = SyntaxHighlighter(language: language, textView: textView)
     }
 
     // MARK: - NSTextViewDelegate
 
     func textDidChange(_ notification: Notification) {
         document?.updateChangeCount(.changeDone)
+        highlighter?.textDidChange()
     }
 
     /// Nothing wires a text view to its document's undo manager: NSWindowController
