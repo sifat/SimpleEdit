@@ -33,6 +33,10 @@ enum SyntaxTheme {
         case .keyword: .systemPink
         case .property: .systemBlue
         case .function: .systemIndigo
+        // TypeScript. Shares purple with `attribute` the way `property` shares
+        // blue with `tag`: the two never occur in the same file, since nothing
+        // in TypeScript is captured as an attribute.
+        case .type: .systemPurple
         case .invalid: .systemOrange
         }
     }

@@ -33,6 +33,10 @@ let package = Package(
         //
         // Note the capital S: 0.23.0 spelled the product TreeSitterJavascript.
         .package(url: "https://github.com/tree-sitter/tree-sitter-javascript", exact: "0.23.1"),
+        // One product, two grammars (typescript and tsx). No 0.25 tag exists for
+        // this repo, so the scanner hazard above does not arise; both targets
+        // list their scanner.c unconditionally.
+        .package(url: "https://github.com/tree-sitter/tree-sitter-typescript", exact: "0.23.2"),
     ],
     targets: [
         // Foundation only, no AppKit — so `swift test` can cover the parts where a
@@ -55,6 +59,7 @@ let package = Package(
                 .product(name: "TreeSitterHTML", package: "tree-sitter-html"),
                 .product(name: "TreeSitterCSS", package: "tree-sitter-css"),
                 .product(name: "TreeSitterJavaScript", package: "tree-sitter-javascript"),
+                .product(name: "TreeSitterTypeScript", package: "tree-sitter-typescript"),
             ],
             swiftSettings: swiftSettings
         ),

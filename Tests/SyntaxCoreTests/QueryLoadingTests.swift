@@ -21,14 +21,15 @@ struct QueryLoadingTests {
     /// Every case that claims a queries directory, so a new language is covered
     /// by these two tests the moment its enum case exists.
     private static var highlightedLanguages: [SyntaxLanguage] {
-        SyntaxLanguage.allCases.filter { $0.queryDirectoryName != nil }
+        SyntaxLanguage.allCases.filter { !$0.queryFiles.isEmpty }
     }
 
-    @Test("The vendored highlights.scm is present in the source tree", arguments: highlightedLanguages)
-    func queryFileExists(language: SyntaxLanguage) throws {
-        let directory = try #require(language.queryDirectoryName)
-        let file = Self.queriesRoot.appendingPathComponent("\(directory)/highlights.scm")
-        #expect(FileManager.default.fileExists(atPath: file.path))
+    @Test("Every vendored query file is present in the source tree", arguments: highlightedLanguages)
+    func queryFilesExist(language: SyntaxLanguage) {
+        for file in language.queryFiles {
+            let url = Self.queriesRoot.appendingPathComponent(file)
+            #expect(FileManager.default.fileExists(atPath: url.path), "missing \(file)")
+        }
     }
 
     @Test("It compiles against the pinned grammar", arguments: highlightedLanguages)

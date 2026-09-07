@@ -3,6 +3,7 @@ import SwiftTreeSitter
 import TreeSitterCSS
 import TreeSitterHTML
 import TreeSitterJavaScript
+import TreeSitterTypeScript
 
 /// Turns source text into tokens. One per document.
 ///
@@ -22,19 +23,20 @@ public final class SyntaxParser {
     /// from a file inside the app bundle, and a `try!` here would turn a
     /// packaging mistake into a crash on open.
     public init?(language: SyntaxLanguage, queriesRoot: URL) {
-        guard let configuration = Self.configuration(for: language, queriesRoot: queriesRoot),
-              let highlights = configuration.queries[.highlights]
+        guard let grammar = Self.grammar(for: language) else { return nil }
+        let tsLanguage = Language(grammar)
+        guard let query = Self.query(for: language, tsLanguage: tsLanguage, queriesRoot: queriesRoot)
         else { return nil }
 
         let parser = Parser()
         do {
-            try parser.setLanguage(configuration.language)
+            try parser.setLanguage(tsLanguage)
         } catch {
             return nil
         }
 
         self.parser = parser
-        self.query = highlights
+        self.query = query
         self.language = language
     }
 
@@ -78,23 +80,43 @@ public final class SyntaxParser {
         return SyntaxTokenList(tokens)
     }
 
-    private static func configuration(
-        for language: SyntaxLanguage,
-        queriesRoot: URL
-    ) -> LanguageConfiguration? {
-        guard let directory = language.queryDirectoryName else { return nil }
-        let tsLanguage: OpaquePointer
+    private static func grammar(for language: SyntaxLanguage) -> OpaquePointer? {
         switch language {
-        case .plain: return nil
-        case .html: tsLanguage = tree_sitter_html()
-        case .css: tsLanguage = tree_sitter_css()
-        case .javascript: tsLanguage = tree_sitter_javascript()
+        case .plain: nil
+        case .html: tree_sitter_html()
+        case .css: tree_sitter_css()
+        case .javascript: tree_sitter_javascript()
+        case .typescript: tree_sitter_typescript()
         }
+    }
 
-        return try? LanguageConfiguration(
-            Language(tsLanguage),
-            name: directory,
-            queriesURL: queriesRoot.appendingPathComponent(directory, isDirectory: true)
-        )
+    /// Builds the query from `language.queryFiles`, concatenated in order.
+    ///
+    /// Deliberately not `LanguageConfiguration(_:name:queriesURL:)`, which
+    /// resolves exactly one hardcoded `highlights.scm` per directory. That is
+    /// one file too few for TypeScript, whose own query is a fragment upstream
+    /// composes with JavaScript's -- and the failure mode of loading the
+    /// fragment alone is silent, not loud.
+    ///
+    /// A newline is inserted between files rather than trusting each to end in
+    /// one: without it the last pattern of one file and the first of the next
+    /// would fuse into a single malformed pattern, and the whole query would
+    /// fail to compile with an offset pointing at neither file.
+    private static func query(
+        for language: SyntaxLanguage,
+        tsLanguage: Language,
+        queriesRoot: URL
+    ) -> Query? {
+        let files = language.queryFiles
+        guard !files.isEmpty else { return nil }
+
+        var data = Data()
+        for file in files {
+            guard let part = try? Data(contentsOf: queriesRoot.appendingPathComponent(file))
+            else { return nil }
+            data.append(part)
+            data.append(0x0A)
+        }
+        return try? Query(language: tsLanguage, data: data)
     }
 }

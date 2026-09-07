@@ -16,6 +16,7 @@ public enum SyntaxTokenKind: String, Sendable, CaseIterable {
     case keyword
     case property
     case function
+    case type
     case invalid
 
     /// tree-sitter capture names are dotted and hierarchical, and the convention
@@ -76,11 +77,31 @@ public enum SyntaxTokenKind: String, Sendable, CaseIterable {
     /// With those three unmapped, no range in real JavaScript carries two
     /// different kinds, so the token list is decided by the grammar rather than
     /// by the sort.
+    /// TypeScript inherits JavaScript's three for the same reasons -- its query
+    /// is JavaScript's with a fragment in front -- and adds one of its own.
+    /// `type` is the one capture name that means something genuinely different
+    /// in two grammars: in CSS it is the `px` in `10px`, which the shared table
+    /// maps to `.constant` so that a number and its unit colour as one thing;
+    /// in TypeScript it is a type NAME, and painting `HttpResponse` the same
+    /// teal as the number `10` is the most visible way to look wrong.
+    ///
+    /// Because TypeScript maps `type` and leaves `constructor` unmapped, a
+    /// capitalised identifier -- captured as `@type` by the fragment and
+    /// `@constructor` by JavaScript's half, over the same range -- resolves to
+    /// the type colour rather than to nothing. So `new HttpError()` is coloured
+    /// in a `.ts` file and plain in a `.js` one, which is not an inconsistency:
+    /// only the TypeScript grammar actually knows it is a type.
     private static let overrides: [SyntaxLanguage: [String: SyntaxTokenKind?]] = [
         .javascript: [
             "variable": nil,
             "constructor": nil,
             "embedded": nil,
+        ],
+        .typescript: [
+            "variable": nil,
+            "constructor": nil,
+            "embedded": nil,
+            "type": .type,
         ],
     ]
 

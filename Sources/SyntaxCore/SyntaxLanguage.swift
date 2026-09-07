@@ -10,6 +10,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
     case html
     case css
     case javascript
+    case typescript
 
     public var title: String {
         switch self {
@@ -17,6 +18,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         case .html: "HTML"
         case .css: "CSS"
         case .javascript: "JavaScript"
+        case .typescript: "TypeScript"
         }
     }
 
@@ -29,6 +31,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         case .html: 1
         case .css: 2
         case .javascript: 3
+        case .typescript: 4
         }
     }
 
@@ -47,6 +50,9 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         // which this app does not vendor, and the plain query colours JSX
         // markup as ordinary expressions.
         case .javascript: ["js", "mjs", "cjs"]
+        // Not "tsx": that needs the JSX query as a third fragment, and this
+        // app does not vendor it.
+        case .typescript: ["ts", "mts", "cts"]
         }
     }
 
@@ -81,18 +87,50 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         switch self {
         case .plain: 0
         case .html, .css: 64 * 1024
-        case .javascript: 32 * 1024
+        case .javascript, .typescript: 32 * 1024
         }
     }
 
-    /// Subdirectory under `Resources/Queries/`. Matches the grammar's canonical
-    /// name, so this is the single string tying the enum to the filesystem.
+    /// The query files to concatenate, in order, relative to the queries root.
+    ///
+    /// A list rather than one file per language because TypeScript's
+    /// `highlights.scm` is not a whole query. It is a 35-line **fragment** --
+    /// type names, type arguments, parameters and fifteen TypeScript-only
+    /// keywords -- carrying no strings, comments, numbers, operators, brackets
+    /// or any JavaScript keyword. Upstream states the composition itself, in
+    /// tree-sitter-typescript's own `tree-sitter.json`:
+    ///
+    ///     "highlights": [
+    ///       "queries/highlights.scm",
+    ///       "node_modules/tree-sitter-javascript/queries/highlights.scm"
+    ///     ]
+    ///
+    /// The order is upstream's and is preserved here. Loading the fragment on
+    /// its own is not a reduced-fidelity option: it colours a few per cent of a
+    /// file and fails **silently**, which looks broken rather than deliberately
+    /// plain. Concatenating at load time is what lets both files stay
+    /// byte-for-byte copies of a real upstream URL, each with its own tag
+    /// pinned in its own SOURCE.md -- the property that makes a version bump a
+    /// plain diff.
+    public var queryFiles: [String] {
+        guard let directory = queryDirectoryName else { return [] }
+        let own = "\(directory)/highlights.scm"
+        switch self {
+        case .typescript: return [own, "javascript/highlights.scm"]
+        default: return [own]
+        }
+    }
+
+    /// Subdirectory under `Resources/Queries/` holding this language's vendored
+    /// files. Matches the grammar's canonical name, so this is the single
+    /// string tying the enum to the filesystem.
     public var queryDirectoryName: String? {
         switch self {
         case .plain: nil
         case .html: "html"
         case .css: "css"
         case .javascript: "javascript"
+        case .typescript: "typescript"
         }
     }
 }

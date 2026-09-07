@@ -31,6 +31,16 @@ struct QueryContractTests {
             "punctuation.special", "string", "string.special", "variable",
             "variable.builtin",
         ],
+        // JavaScript's nineteen plus three the fragment adds. If this ever
+        // equals JavaScript's set exactly, the concatenation silently stopped
+        // happening and TypeScript is being highlighted as plain JavaScript.
+        .typescript: [
+            "comment", "constant", "constant.builtin", "constructor", "embedded",
+            "function", "function.builtin", "function.method", "keyword", "number",
+            "operator", "property", "punctuation.bracket", "punctuation.delimiter",
+            "punctuation.special", "string", "string.special", "variable",
+            "variable.builtin", "type", "type.builtin", "variable.parameter",
+        ],
     ]
 
     /// Captures a language emits and this app deliberately does not colour.
@@ -39,16 +49,23 @@ struct QueryContractTests {
     /// capture that becomes unmapped by ACCIDENT still fails the suite.
     private static let deliberatelyUnmapped: [SyntaxLanguage: Set<String>] = [
         .javascript: ["variable", "variable.builtin", "constructor", "embedded"],
+        .typescript: ["variable", "variable.builtin", "variable.parameter", "constructor", "embedded"],
     ]
 
+    /// Reads every file the language composes its query from, not just its own
+    /// directory -- TypeScript's set is its fragment plus JavaScript's whole
+    /// query, and pinning only the fragment would pin five names out of
+    /// twenty-two.
     private static func captureNames(in language: SyntaxLanguage) throws -> Set<String> {
-        let directory = try #require(language.queryDirectoryName)
-        let file = URL(fileURLWithPath: #filePath)
+        let root = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-            .appendingPathComponent("Resources/Queries/\(directory)/highlights.scm")
-        var text = try String(contentsOf: file, encoding: .utf8)
+            .appendingPathComponent("Resources/Queries", isDirectory: true)
+        #expect(!language.queryFiles.isEmpty)
+        var text = try language.queryFiles
+            .map { try String(contentsOf: root.appendingPathComponent($0), encoding: .utf8) }
+            .joined(separator: "\n")
 
         // Strip quoted literals FIRST, then `;` comments, before looking for
         // captures. Both strips are needed: the CSS query matches at-rules by
@@ -85,7 +102,7 @@ struct QueryContractTests {
     /// prevent, reintroduced by omission.
     @Test("Every language with a query has its capture set pinned")
     func everyLanguageIsPinned() {
-        for language in SyntaxLanguage.allCases where language.queryDirectoryName != nil {
+        for language in SyntaxLanguage.allCases where !language.queryFiles.isEmpty {
             #expect(
                 Self.expectedCaptures[language] != nil,
                 "no pinned capture set for \(language.rawValue)"
