@@ -1,8 +1,17 @@
 # SimpleEdit
 
 A small native macOS text editor. Swift + AppKit + `NSDocument`, built with SwiftPM,
-wrapped into a `.app` by a shell script. No Electron, no xcodeproj, no xib, no
-third-party dependencies.
+wrapped into a `.app` by a shell script. No Electron, no xcodeproj, no xib.
+
+Five third-party dependencies, all pinned to exact versions and all for syntax
+highlighting: [`swift-tree-sitter`](https://github.com/tree-sitter/swift-tree-sitter)
+plus the [HTML](https://github.com/tree-sitter/tree-sitter-html),
+[CSS](https://github.com/tree-sitter/tree-sitter-css),
+[JavaScript](https://github.com/tree-sitter/tree-sitter-javascript) and
+[TypeScript](https://github.com/tree-sitter/tree-sitter-typescript) grammars. Each
+grammar's highlight query is vendored into `Resources/Queries/` under its MIT licence
+— see the `SOURCE.md` beside it for why, and for how to keep it in step with
+upstream.
 
 If you have come to macOS from Linux and miss **gedit** — a plain editor that opens
 instantly, edits a file, and gets out of the way — this is that, built the way a Mac
@@ -57,9 +66,14 @@ open build/SimpleEdit.app
 Then drag `build/SimpleEdit.app` to `/Applications`.
 
 ```sh
-swift test                                          # EditorCore unit tests
+swift test                                          # EditorCore + SyntaxCore unit tests
 go test ./tools/jsonfmt                             # JSON golden tests
 ```
+
+`Package.resolved` is committed deliberately: it is the only record of which
+grammar commit a given build shipped. The first resolve is slow — `swift-tree-sitter`
+carries a git submodule (a Swift grammar this project never uses) that SwiftPM
+clones anyway.
 
 ### Debugging
 
@@ -142,6 +156,101 @@ Find and Replace lives in the standard AppKit find bar: the ‹ › buttons step
 matches, and the Replace disclosure reveals a `Replace` button (one at a time) and
 `All`. The bar has no match counter — AppKit does not ship one.
 
+## Syntax highlighting
+
+**HTML** (`.html`, `.htm`), **CSS** (`.css`), **JavaScript** (`.js`, `.mjs`, `.cjs`)
+and **TypeScript** (`.ts`, `.mts`, `.cts`) are coloured. Nothing else is, and nothing
+needs turning on: the language is detected from the file extension when the document
+opens.
+
+Inside an HTML page, `<style>` and `<script>` bodies are coloured as CSS and
+JavaScript. The HTML grammar hands those over as one opaque node, so each is
+re-parsed with its own grammar and the results are merged back into the document's
+own offsets.
+
+Colour is delivered through `NSTextLayoutManager.renderingAttributesValidator` —
+TextKit 2 asks for a fragment's colours as it lays that fragment out — and never by
+mutating `NSTextStorage`. That is the whole design constraint: colour cannot reach
+undo, the edited flag or the save path, so a highlighted document saves
+byte-identical and closing it asks nothing. Why that particular API, and the
+measurements behind it, are in [Escape hatches](#escape-hatches).
+
+| | |
+| --- | --- |
+| Tags, selectors, property and method names | blue |
+| Attributes, pseudo-classes | purple |
+| Type names | purple |
+| Strings, hex colours, regex literals | red |
+| Comments | green |
+| Numbers, units, the doctype, `true`/`null` | teal |
+| Keywords, at-rules, `!important` | pink |
+| Functions | indigo |
+| Brackets, operators, delimiters | grey |
+| Mismatched closing tag | orange |
+
+Plain identifiers are **not** coloured, in any language — variables, parameters, and
+in JavaScript class names too. That is a deliberate consequence of how overlapping
+captures are resolved, and `Resources/Queries/javascript/SOURCE.md` explains it: the
+grammar captures every identifier, and that capture collides with several others over
+the same range, so colouring it would make the winner a sort tie-break rather than a
+decision. In TypeScript, capitalised names *are* coloured, because there the type
+grammar genuinely knows they are types.
+
+They are system colours, so Dark mode, Increase Contrast and appearance switching
+all work with no code — see the spike notes for why that comes free.
+
+Adding a language is an enum case in `SyntaxLanguage`, a directory under
+`Resources/Queries/`, one package dependency, and its capture names in
+`SyntaxTokenKind`. Capture names are interpreted **per language**, because grammars
+reuse the same name for different things: `@variable` is a CSS custom property and
+any identifier at all in JavaScript, and `@type` is the `px` in CSS's `10px` and a
+type name in TypeScript. `build.sh` copies the whole queries tree, so it needs no change.
+The vendored `.scm` files are **byte-for-byte copies of upstream and must not be
+edited** — remapping happens in Swift, which is what keeps a version bump a plain
+diff. `swift test` pins each query's capture set, so a grammar bump that renames a
+capture fails the suite instead of silently un-colouring something.
+
+### What it does not do
+
+- **Large files are not highlighted at all** — above 64 KB for CSS, above 32 KB for
+  everything else. Tokenising is synchronous on the edit path, so its cost is paid
+  per keystroke, and it is measured rather than guessed:
+
+  | | |
+  | --- | --- |
+  | JavaScript, library code | 0.72 ms/KB |
+  | CSS, real stylesheets | 0.95 ms/KB |
+  | JavaScript, dense component code | 2.31 ms/KB |
+  | HTML, tag-dense markup | 2.43 ms/KB |
+
+  The spread is three-fold *within* a language, because the cost is per capture
+  rather than per byte: a file of long prose comments is cheap, a file of short
+  chained calls or tiny nested tags is not. CSS keeps the larger cap because real
+  stylesheets produce about half the captures per KB that the others do.
+
+  Almost none of this is tree-sitter, which parses 500 KB in 139 ms. About 80% is
+  enumerating query captures through `swift-tree-sitter`, which allocates a String,
+  an array and a dictionary for **every capture**. Raising the caps means driving
+  `ts_query_cursor_next_match` directly, not tuning this side — and note that an
+  incremental reparse would not help, since the query is re-enumerated over the whole
+  tree however little of it was re-parsed.
+- **Minified files are not highlighted**, on the signal the editor already has: if a
+  file's longest line forced wrapping off, one layout fragment covers the whole
+  document and the validator would be handed every token in it at once.
+- **`.jsx` and `.tsx` are not claimed.** Both need a second JSX query file that is
+  not vendored, and claiming them without it would colour JSX markup as ordinary
+  expressions.
+- **A locally shadowed builtin is still coloured as a builtin** in JavaScript. The
+  query asks for `#is-not? local`, which needs `locals.scm` and a scope resolver;
+  neither is loaded, so the predicate always passes.
+- **There is no language override menu.** Detection is by extension only, so a
+  stylesheet saved as `.txt` stays plain. This is not an oversight — changing the
+  language of an open document cannot repaint it, for the reason recorded under
+  [Escape hatches](#escape-hatches): colour cannot be refreshed when the text itself
+  has not changed.
+- **Printing is black.** The print view is a separate TextKit 1 view with no
+  highlighter attached.
+
 ## The Go helper
 
 `tools/jsonfmt` is ~100 lines of Go with no dependencies, built into
@@ -187,6 +296,14 @@ toggle, printing (5 correctly paginated pages from a 122-line file, verified thr
 PDF export), and autosave recovery — an unsaved edit survives `kill -9` while the
 file on disk stays byte-identical.
 
+Syntax highlighting was checked the same way, in a running app rather than only
+under test: all four languages on real files, a single page carrying inline
+`<style>` and `<script>` with all three grammars colouring at once, colour following
+live typing, Dark mode re-resolving every colour with no code involved, a saved file
+byte-identical to what was typed, and opening then closing a highlighted document
+raising no unsaved-changes sheet — the last two being the properties the whole
+rendering-attributes design exists to protect.
+
 **Seen once, not reproduced:** ⌘W closed a tab other than the selected one. It
 happened during scripted UI testing, with the intended tab selected and its title
 in the title bar, so it may equally have been an artefact of synthesised
@@ -197,15 +314,15 @@ bug in how Close routes through the responder chain.
 
 Planned for the next version, in no particular order.
 
-- **Syntax highlighting** for widely used languages. Which languages is an open
-  question and will be decided as it goes — this is a continuous process rather
-  than a single release. The likely stack is `tree-sitter` with the first-party
-  `swift-tree-sitter` binding, which is what CotEditor 7 ships; that would be this
-  project's first third-party dependency, so it is a deliberate decision rather
-  than an implementation detail. On the TextKit 2 side the hook is
-  `NSTextLayoutManager.renderingAttributesValidator`, pulled during fragment
-  layout. Colour has to stay in rendering attributes and out of `NSTextStorage`,
-  or it reaches undo, the edited flag and the save path.
+- **More languages for syntax highlighting**, one at a time. HTML, CSS, JavaScript
+  and TypeScript ship; python, php, shell and java remain, in an order still to be
+  decided. Each is an enum case, a vendored query directory and a package
+  dependency — see [Syntax highlighting](#syntax-highlighting).
+- **Raising the highlighting size limits**, which needs the query-capture loop to go
+  through the C API — the measurements and the reasoning are in
+  [Syntax highlighting](#syntax-highlighting). This is now the single change that
+  would most improve the feature.
+
 Nothing else is planned for the next release.
 
 ## Notes and limitations
@@ -259,6 +376,46 @@ Nothing else is planned for the next release.
   TextKit 1 if a custom find bar with highlight-all is ever needed
   (`addTemporaryAttribute` is TextKit 1 only) — that also means switching
   `LineNumberRulerView` to `NSLayoutManager.enumerateLineFragments`.
+- **TextKit 2 rendering attributes work, but only if you never invalidate them.**
+  Syntax highlighting colours text through
+  `NSTextLayoutManager.renderingAttributesValidator` rather than by mutating
+  `NSTextStorage`, so colour never reaches undo, the edited flag or the save path.
+  That approach has a bad public reputation — Apple DTS confirmed on Developer
+  Forums thread 817471 that `addRenderingAttribute` plus `invalidateLayout` stores
+  attributes without repainting, FB9692714 has been open since 2022, and STTextView
+  abandoned the API — so it was measured before being adopted. Findings, from a
+  throwaway spike on a 200-line file:
+
+  - The validator fires reliably. Colour is present on first paint with no
+    keystroke, scroll or resize, and after an edit **every affected fragment
+    re-validates, including ones far below the edit**. 147 validator calls on open,
+    about 5 for a local edit.
+  - **`invalidateRenderingAttributes(for:)` destroys colour and never asks for it
+    back.** The header says enumeration "will skip the invalidated range", and that
+    is exactly what happens — call it and the text goes black, permanently, through
+    edits and even a window resize. Every escalation built on it made things worse
+    than doing nothing. This is very likely what the public reports are actually
+    hitting: the instinct is to invalidate, and invalidating is the bug.
+  - So the rule is: **set attributes from the validator, and never invalidate
+    them.** Let re-layout drop them and re-ask.
+  - Dynamic `NSColor`s resolve at draw time inside rendering attributes, so an
+    appearance change recolours correctly with no invalidation and no observer.
+    Semantic and `system*` colours are therefore free.
+  - The validator runs on the main thread, synchronously during layout, at 5–11 µs
+    mean and 60 µs worst case per fragment. It must stay a pure lookup: no parsing,
+    no `ensureLayout`, no `needsDisplay`.
+  - Saving a coloured document produces a byte-identical file.
+
+  What is *not* solved: changing the colour of already-laid-out text when the text
+  itself has not changed. Neither doing nothing nor `invalidateLayout` repaints it.
+  Appearance switching is unaffected, since dynamic colours handle that at draw
+  time, but two things do depend on it: user-selectable themes, and a View ▸ Syntax
+  menu that could change an open document's language. Both are blocked on the same
+  question. The untried candidate is a `performEditingTransaction` around
+  `textStorage.edited(.editedAttributes, range:, changeInLength: 0)`, which would
+  have to be shown not to set the edited flag or register undo before it could be
+  used for anything.
+
 - **Find bar.** Every Find menu item is tagged with an `NSTextFinder.Action` raw
   value and targets First Responder. Replacing the stock bar with a custom one is a
   selector change on those items, with no other menu edits.
