@@ -72,22 +72,35 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
     ///
     /// Per language because the cost is per language, and measured rather than
     /// guessed. Tokenising runs synchronously on the keystroke path, so these
-    /// are chosen to hold the worst case near 60 ms:
+    /// are chosen to hold the worst case near 60-80 ms:
     ///
-    ///     CSS, real stylesheets          0.95 ms/KB
     ///     JavaScript, library code       0.72 ms/KB
-    ///     JavaScript, dense component    2.31 ms/KB   <- what 32 KB is sized for
+    ///     CSS, real stylesheets          0.95 ms/KB
+    ///     CSS, synthetic dense           1.28 ms/KB
+    ///     JavaScript, dense component    2.31 ms/KB
+    ///     HTML, tag-dense markup         2.43 ms/KB
     ///
-    /// The spread inside JavaScript is three-fold and is about token density,
-    /// not file size: the cost is dominated by per-capture allocation inside
-    /// swift-tree-sitter, so what matters is how many captures a KB produces.
-    /// A file of long prose comments is cheap; a file of short chained calls is
-    /// not. 32 KB keeps even the dense case near 74 ms.
+    /// The spread is three-fold WITHIN a single language, and it is about token
+    /// density rather than file size: the cost is dominated by per-capture
+    /// allocation inside swift-tree-sitter, so what matters is how many
+    /// captures a KB produces. A file of long prose comments is cheap; a file
+    /// of short chained calls or of tiny nested tags is not.
+    ///
+    /// CSS is the outlier that keeps 64 KB, and it earns it: real stylesheets
+    /// produce about half the captures per KB that dense markup or component
+    /// JavaScript do.
+    ///
+    /// Injections do NOT make HTML worse per KB, which is worth stating because
+    /// it is the opposite of what one expects: an inline script is less
+    /// capture-dense than the markup around it, so a page with a large
+    /// `<script>` measures *cheaper* per KB than the same page of pure markup.
+    /// HTML's cap is 32 KB because of its markup, not because of what it
+    /// embeds.
     public var maximumLength: Int {
         switch self {
         case .plain: 0
-        case .html, .css: 64 * 1024
-        case .javascript, .typescript: 32 * 1024
+        case .css: 64 * 1024
+        case .html, .javascript, .typescript: 32 * 1024
         }
     }
 
@@ -118,6 +131,33 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         switch self {
         case .typescript: return [own, "javascript/highlights.scm"]
         default: return [own]
+        }
+    }
+
+    /// The injections query, if this language embeds others.
+    ///
+    /// Only HTML does. The file marks the body of a `<script>` or `<style>`
+    /// element and tags it with a language NAME -- tree-sitter's name, not
+    /// ours; upstream is explicit that these are not standardised, which is why
+    /// `init?(injectionName:)` exists rather than a rawValue lookup.
+    public var injectionQueryFile: String? {
+        switch self {
+        case .html: "html/injections.scm"
+        default: nil
+        }
+    }
+
+    /// Maps an `injection.language` value from a query to a language we have.
+    ///
+    /// Deliberately not `SyntaxLanguage(rawValue:)`. These strings belong to the
+    /// grammar that emitted them, and a grammar is free to rename them or to
+    /// name something we have never heard of; an unknown name simply means that
+    /// region stays plain.
+    public init?(injectionName: String) {
+        switch injectionName {
+        case "javascript": self = .javascript
+        case "css": self = .css
+        default: return nil
         }
     }
 

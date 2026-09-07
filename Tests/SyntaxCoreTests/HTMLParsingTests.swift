@@ -79,16 +79,20 @@ struct HTMLParsingTests {
         #expect(found.contains { $0 == ("a", .tag) })
     }
 
-    /// Pins the HTML-only decision: script and style bodies are one opaque
-    /// raw_text node, so nothing inside them is coloured -- including a `<`
-    /// that is not markup at all. If this ever starts producing tokens,
-    /// injections have been turned on and that was a deliberate change.
-    @Test("Script bodies stay plain, and a < inside one is not punctuation")
-    func scriptBodyIsPlain() throws {
+    /// The counterpart of the injection tests: a `<` inside a script body is a
+    /// less-than operator, not markup. Before injections it produced no token
+    /// at all; now it is coloured by the JavaScript grammar, which is the same
+    /// answer for a better reason.
+    @Test("A < inside a script body is an operator, not a tag bracket")
+    func lessThanInsideScript() throws {
         let found = try highlight("<script>let x = 1 < 2;</script>")
         #expect(found.contains { $0 == ("script", .tag) })
-        #expect(!found.contains { $0.0 == "let x = 1 < 2;" })
-        #expect(!found.contains { $0.0.contains("=") })
+        #expect(found.contains { $0 == ("let", .keyword) })
+        // `<` is captured by JavaScript as an operator, which this app colours
+        // as punctuation -- the same kind an HTML angle bracket gets, but
+        // arrived at through the right grammar.
+        #expect(found.contains { $0 == ("<", .punctuation) })
+        #expect(!found.contains { $0.0 == "x" })
     }
 
     @Test("Malformed input parses without crashing")

@@ -60,9 +60,12 @@ struct SyntaxLanguageTests {
             #expect(language.maximumLength > 0, "\(language.rawValue) has no size cap")
         }
         #expect(SyntaxLanguage.plain.maximumLength == 0)
-        // JavaScript is denser per KB than the markup languages, so its cap is
-        // lower. If these ever match, one of them was changed without measuring.
+        // Real stylesheets produce about half the captures per KB that dense
+        // markup or component JavaScript do, so CSS is the one language that
+        // earns a larger cap. If these ever match, one was changed without
+        // measuring.
         #expect(SyntaxLanguage.javascript.maximumLength < SyntaxLanguage.css.maximumLength)
+        #expect(SyntaxLanguage.html.maximumLength < SyntaxLanguage.css.maximumLength)
     }
 
     /// Two languages claiming the same extension would make detection depend on
