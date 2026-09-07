@@ -15,10 +15,22 @@ final class SyntaxHighlighter {
     private let parser: SyntaxParser
     private var tokens: SyntaxTokenList = .empty
 
-    /// Above this the document is not highlighted at all. tree-sitter is fast
-    /// but not free, and parsing happens synchronously on the edit path (see
-    /// `textDidChange`). Measured rather than guessed: see the README.
-    private static let maximumLength = 2 * 1024 * 1024
+    /// Above this the document is not highlighted at all.
+    ///
+    /// 64 KB is small, and it is small because it was measured rather than
+    /// guessed. Tokenising costs about **0.9 ms per KB** -- 71 ms for a real
+    /// 77 KB stylesheet, 660 ms for 500 KB -- and because the parse is
+    /// synchronous on the edit path, that is per keystroke. 64 KB keeps the
+    /// worst case near 60 ms and an ordinary file (the median here is under
+    /// 2 KB) inside a single frame.
+    ///
+    /// Almost none of that cost is tree-sitter, which parses 500 KB in 139 ms.
+    /// It is swift-tree-sitter's `QueryCursor`, which allocates a name String,
+    /// a `components(separatedBy:)` array and a metadata Dictionary for **every
+    /// capture** -- roughly 5 µs each, against 80,000 captures in that 500 KB
+    /// file. Raising this cap means going around that loop with the C query
+    /// API, not tuning anything here.
+    private static let maximumLength = 64 * 1024
 
     init?(language: SyntaxLanguage, textView: NSTextView) {
         guard let queriesRoot = Bundle.main.resourceURL?
@@ -119,9 +131,12 @@ final class SyntaxHighlighter {
     /// changed, so the stale colours would simply persist. Parsing here means
     /// the tokens are already correct by the time TextKit asks for them.
     ///
-    /// This is affordable because the document size is capped. If that ever
-    /// stops being true, the fix is not a debounce -- it is an incremental
-    /// reparse, so that the synchronous work stays proportional to the edit.
+    /// This is affordable because the document size is capped, and the cap is
+    /// what has to move if it ever stops being affordable. Note that an
+    /// incremental reparse would NOT help: the measurements behind
+    /// `maximumLength` put roughly 80% of the cost in enumerating query
+    /// captures, which happens over the whole tree however little of it was
+    /// re-parsed.
     func textDidChange() {
         reparse()
     }
