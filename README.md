@@ -3,14 +3,17 @@
 A small native macOS text editor. Swift + AppKit + `NSDocument`, built with SwiftPM,
 wrapped into a `.app` by a shell script. No Electron, no xcodeproj, no xib.
 
-Five third-party dependencies, all pinned to exact versions and all for syntax
-highlighting: [`swift-tree-sitter`](https://github.com/tree-sitter/swift-tree-sitter)
-plus the [HTML](https://github.com/tree-sitter/tree-sitter-html),
+Five third-party dependencies, all pinned to exact versions, all for syntax
+highlighting, and **all of them C**:
+[`tree-sitter`](https://github.com/tree-sitter/tree-sitter) itself plus the
+[HTML](https://github.com/tree-sitter/tree-sitter-html),
 [CSS](https://github.com/tree-sitter/tree-sitter-css),
 [JavaScript](https://github.com/tree-sitter/tree-sitter-javascript) and
-[TypeScript](https://github.com/tree-sitter/tree-sitter-typescript) grammars. Each
-grammar's highlight query is vendored into `Resources/Queries/` under its MIT licence
-— see the `SOURCE.md` beside it for why, and for how to keep it in step with
+[TypeScript](https://github.com/tree-sitter/tree-sitter-typescript) grammars. There is
+no Swift binding in between — the query loop talks to the C API directly, because the
+binding allocated an object per capture and that was most of the cost of highlighting.
+Each grammar's highlight query is vendored into `Resources/Queries/` under its MIT
+licence — see the `SOURCE.md` beside it for why, and for how to keep it in step with
 upstream.
 
 If you have come to macOS from Linux and miss **gedit** — a plain editor that opens
