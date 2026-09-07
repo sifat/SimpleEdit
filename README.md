@@ -3,12 +3,15 @@
 A small native macOS text editor. Swift + AppKit + `NSDocument`, built with SwiftPM,
 wrapped into a `.app` by a shell script. No Electron, no xcodeproj, no xib.
 
-Three third-party dependencies, all pinned to exact versions and all for syntax
+Five third-party dependencies, all pinned to exact versions and all for syntax
 highlighting: [`swift-tree-sitter`](https://github.com/tree-sitter/swift-tree-sitter)
-plus the [HTML](https://github.com/tree-sitter/tree-sitter-html) and
-[CSS](https://github.com/tree-sitter/tree-sitter-css) grammars. Each grammar's
-highlight query is vendored into `Resources/Queries/` under its MIT licence — see
-the `SOURCE.md` beside it for why, and for how to keep it in step with upstream.
+plus the [HTML](https://github.com/tree-sitter/tree-sitter-html),
+[CSS](https://github.com/tree-sitter/tree-sitter-css),
+[JavaScript](https://github.com/tree-sitter/tree-sitter-javascript) and
+[TypeScript](https://github.com/tree-sitter/tree-sitter-typescript) grammars. Each
+grammar's highlight query is vendored into `Resources/Queries/` under its MIT licence
+— see the `SOURCE.md` beside it for why, and for how to keep it in step with
+upstream.
 
 If you have come to macOS from Linux and miss **gedit** — a plain editor that opens
 instantly, edits a file, and gets out of the way — this is that, built the way a Mac
@@ -155,9 +158,15 @@ matches, and the Replace disclosure reveals a `Replace` button (one at a time) a
 
 ## Syntax highlighting
 
-**HTML** (`.html`, `.htm`) and **CSS** (`.css`) are coloured. Nothing else is, and
-nothing needs turning on: the language is detected from the file extension when the
-document opens.
+**HTML** (`.html`, `.htm`), **CSS** (`.css`), **JavaScript** (`.js`, `.mjs`, `.cjs`)
+and **TypeScript** (`.ts`, `.mts`, `.cts`) are coloured. Nothing else is, and nothing
+needs turning on: the language is detected from the file extension when the document
+opens.
+
+Inside an HTML page, `<style>` and `<script>` bodies are coloured as CSS and
+JavaScript. The HTML grammar hands those over as one opaque node, so each is
+re-parsed with its own grammar and the results are merged back into the document's
+own offsets.
 
 Colour is delivered through `NSTextLayoutManager.renderingAttributesValidator` —
 TextKit 2 asks for a fragment's colours as it lays that fragment out — and never by
@@ -168,22 +177,34 @@ measurements behind it, are in [Escape hatches](#escape-hatches).
 
 | | |
 | --- | --- |
-| Tags, selectors, property names | blue |
+| Tags, selectors, property and method names | blue |
 | Attributes, pseudo-classes | purple |
-| Strings, hex colours | red |
+| Type names | purple |
+| Strings, hex colours, regex literals | red |
 | Comments | green |
-| Numbers, units, the doctype | teal |
-| At-rules, `!important` | pink |
+| Numbers, units, the doctype, `true`/`null` | teal |
+| Keywords, at-rules, `!important` | pink |
 | Functions | indigo |
-| Brackets, combinators, delimiters | grey |
+| Brackets, operators, delimiters | grey |
 | Mismatched closing tag | orange |
+
+Plain identifiers are **not** coloured, in any language — variables, parameters, and
+in JavaScript class names too. That is a deliberate consequence of how overlapping
+captures are resolved, and `Resources/Queries/javascript/SOURCE.md` explains it: the
+grammar captures every identifier, and that capture collides with several others over
+the same range, so colouring it would make the winner a sort tie-break rather than a
+decision. In TypeScript, capitalised names *are* coloured, because there the type
+grammar genuinely knows they are types.
 
 They are system colours, so Dark mode, Increase Contrast and appearance switching
 all work with no code — see the spike notes for why that comes free.
 
 Adding a language is an enum case in `SyntaxLanguage`, a directory under
 `Resources/Queries/`, one package dependency, and its capture names in
-`SyntaxTokenKind`. `build.sh` copies the whole queries tree, so it needs no change.
+`SyntaxTokenKind`. Capture names are interpreted **per language**, because grammars
+reuse the same name for different things: `@variable` is a CSS custom property and
+any identifier at all in JavaScript, and `@type` is the `px` in CSS's `10px` and a
+type name in TypeScript. `build.sh` copies the whole queries tree, so it needs no change.
 The vendored `.scm` files are **byte-for-byte copies of upstream and must not be
 edited** — remapping happens in Swift, which is what keeps a version bump a plain
 diff. `swift test` pins each query's capture set, so a grammar bump that renames a
@@ -191,19 +212,37 @@ capture fails the suite instead of silently un-colouring something.
 
 ### What it does not do
 
-- **Files above 64 KB are not highlighted at all.** Tokenising costs about
-  0.9 ms/KB — 71 ms for a real 77 KB stylesheet — and the parse is synchronous on
-  the edit path, so that is per keystroke. 64 KB keeps the worst case near 60 ms.
-  Almost none of that is tree-sitter, which parses 500 KB in 139 ms; about 80% is
+- **Large files are not highlighted at all** — above 64 KB for CSS, above 32 KB for
+  everything else. Tokenising is synchronous on the edit path, so its cost is paid
+  per keystroke, and it is measured rather than guessed:
+
+  | | |
+  | --- | --- |
+  | JavaScript, library code | 0.72 ms/KB |
+  | CSS, real stylesheets | 0.95 ms/KB |
+  | JavaScript, dense component code | 2.31 ms/KB |
+  | HTML, tag-dense markup | 2.43 ms/KB |
+
+  The spread is three-fold *within* a language, because the cost is per capture
+  rather than per byte: a file of long prose comments is cheap, a file of short
+  chained calls or tiny nested tags is not. CSS keeps the larger cap because real
+  stylesheets produce about half the captures per KB that the others do.
+
+  Almost none of this is tree-sitter, which parses 500 KB in 139 ms. About 80% is
   enumerating query captures through `swift-tree-sitter`, which allocates a String,
-  an array and a dictionary for **every capture**. Raising the cap means driving
+  an array and a dictionary for **every capture**. Raising the caps means driving
   `ts_query_cursor_next_match` directly, not tuning this side — and note that an
   incremental reparse would not help, since the query is re-enumerated over the whole
   tree however little of it was re-parsed.
 - **Minified files are not highlighted**, on the signal the editor already has: if a
   file's longest line forced wrapping off, one layout fragment covers the whole
   document and the validator would be handed every token in it at once.
-- **`<script>` and `<style>` bodies stay plain** inside HTML. See the Roadmap.
+- **`.jsx` and `.tsx` are not claimed.** Both need a second JSX query file that is
+  not vendored, and claiming them without it would colour JSX markup as ordinary
+  expressions.
+- **A locally shadowed builtin is still coloured as a builtin** in JavaScript. The
+  query asks for `#is-not? local`, which needs `locals.scm` and a scope resolver;
+  neither is loaded, so the predicate always passes.
 - **There is no language override menu.** Detection is by extension only, so a
   stylesheet saved as `.txt` stays plain. This is not an oversight — changing the
   language of an open document cannot repaint it, for the reason recorded under
@@ -267,18 +306,14 @@ bug in how Close routes through the responder chain.
 
 Planned for the next version, in no particular order.
 
-- **More languages for syntax highlighting**, one at a time. HTML and CSS ship;
-  JavaScript is next, then python, php, shell and java in an order still to be
+- **More languages for syntax highlighting**, one at a time. HTML, CSS, JavaScript
+  and TypeScript ship; python, php, shell and java remain, in an order still to be
   decided. Each is an enum case, a vendored query directory and a package
   dependency — see [Syntax highlighting](#syntax-highlighting).
-- **Colour inside `<script>` and `<style>`.** Deliberately scheduled **after CSS
-  and JavaScript are both done**, and that ordering is a dependency rather than a
-  preference: the HTML grammar's `injections.scm` marks those bodies as
-  `"javascript"` and `"css"`, so there is nothing to inject until both grammars are
-  present. With CSS now in, JavaScript is the remaining prerequisite.
-- **Raising the 64 KB highlighting limit**, which needs the query-capture loop to go
+- **Raising the highlighting size limits**, which needs the query-capture loop to go
   through the C API — the measurements and the reasoning are in
-  [Syntax highlighting](#syntax-highlighting).
+  [Syntax highlighting](#syntax-highlighting). This is now the single change that
+  would most improve the feature.
 
 Nothing else is planned for the next release.
 
