@@ -35,16 +35,25 @@ struct QueryContractTests {
             .appendingPathComponent("Resources/Queries/\(directory)/highlights.scm")
         var text = try String(contentsOf: file, encoding: .utf8)
 
-        // Strip `;` comments and then double-quoted literals BEFORE looking for
-        // captures. The CSS query matches at-rules by their literal text --
+        // Strip quoted literals FIRST, then `;` comments, before looking for
+        // captures. Both strips are needed: the CSS query matches at-rules by
+        // their literal text --
         //
         //     "@media" @keyword
         //
         // -- so a scan that simply splits on "@" reports `media`, `import`,
         // `charset` and three more as capture names the grammar never emits.
-        // The HTML query has no string literals, which is why this only showed
-        // up with the second language.
-        for pattern in [";[^\n]*", "\"[^\"]*\""] {
+        //
+        // The ORDER is what took a third language to expose. The JavaScript
+        // query contains the literal `";"`, and stripping comments first eats
+        // its closing quote; every later quote then pairs off by one and the
+        // rest of the file is stripped as if it were one long string. That
+        // silently pinned 14 of JavaScript's 19 captures -- losing @embedded,
+        // @operator and all three @punctuation.* -- which is precisely the
+        // "a capture stopped being coloured and nothing failed" outcome this
+        // suite exists to prevent. Neither vendored query contains a quoted
+        // `;`, so the HTML and CSS sets are bit-identical either way.
+        for pattern in ["\"[^\"]*\"", ";[^\n]*"] {
             text = text.replacingOccurrences(of: pattern, with: " ", options: .regularExpression)
         }
 
