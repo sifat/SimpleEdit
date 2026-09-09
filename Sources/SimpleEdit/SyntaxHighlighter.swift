@@ -16,19 +16,21 @@ final class SyntaxHighlighter {
     private let language: SyntaxLanguage
     private var tokens: SyntaxTokenList = .empty
 
-    /// The size cap lives on `SyntaxLanguage`, because it differs per language
-    /// and because it is a measured number that belongs next to the other facts
-    /// about a grammar rather than in the AppKit layer. See the comment there
-    /// for what was measured; the short version is that tokenising is
-    /// synchronous on the keystroke path, so the cap is whatever keeps the
-    /// worst case near 60 ms.
+    /// Two limits protect the keystroke path, and they do different jobs.
     ///
-    /// Almost none of that cost is tree-sitter, which parses 500 KB in 139 ms.
-    /// It is swift-tree-sitter's `QueryCursor`, which allocates a name String,
-    /// a `components(separatedBy:)` array and a metadata Dictionary for **every
-    /// capture**. Raising these caps means going around that loop with the C
-    /// query API, not tuning anything here.
-
+    /// `SyntaxLanguage.maximumLength` is a size cap: above it nothing is
+    /// attempted. It bounds the ordinary cost of an ordinary file.
+    ///
+    /// `SyntaxParser.defaultBudget` is a time budget: parsing and querying stop
+    /// at ~80 ms and the document is left plain. It bounds the worst case,
+    /// which a size cap cannot -- the worst case is nesting depth and
+    /// unbalanced brackets, quadratic, and reachable from a normal file
+    /// halfway through being typed. See the comments on both for the
+    /// measurements.
+    ///
+    /// Almost none of the cost is tree-sitter's own parsing on ordinary input;
+    /// it was the Swift binding's per-capture allocation, which is why the
+    /// parser drives the C API directly.
     init?(language: SyntaxLanguage, textView: NSTextView) {
         guard let queriesRoot = Bundle.main.resourceURL?
             .appendingPathComponent("Queries", isDirectory: true)

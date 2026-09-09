@@ -215,28 +215,31 @@ capture fails the suite instead of silently un-colouring something.
 
 ### What it does not do
 
-- **Large files are not highlighted at all** — above 64 KB for CSS, above 32 KB for
-  everything else. Tokenising is synchronous on the edit path, so its cost is paid
-  per keystroke, and it is measured rather than guessed:
+- **Large files are not highlighted at all** — above 128 KB for CSS, above 64 KB
+  for everything else. Tokenising is synchronous on the edit path, so its cost is
+  paid per keystroke. Measured in release, which is what ships:
 
   | | |
   | --- | --- |
-  | JavaScript, library code | 0.72 ms/KB |
-  | CSS, real stylesheets | 0.95 ms/KB |
-  | JavaScript, dense component code | 2.31 ms/KB |
-  | HTML, tag-dense markup | 2.43 ms/KB |
+  | JavaScript, library code | 0.07 ms/KB |
+  | CSS, real stylesheets | 0.12 ms/KB |
+  | JavaScript, dense component code | 0.21 ms/KB |
+  | HTML, tag-dense markup | 0.26 ms/KB |
 
-  The spread is three-fold *within* a language, because the cost is per capture
-  rather than per byte: a file of long prose comments is cheap, a file of short
-  chained calls or tiny nested tags is not. CSS keeps the larger cap because real
-  stylesheets produce about half the captures per KB that the others do.
-
-  Almost none of this is tree-sitter, which parses 500 KB in 139 ms. About 80% is
-  enumerating query captures through `swift-tree-sitter`, which allocates a String,
-  an array and a dictionary for **every capture**. Raising the caps means driving
-  `ts_query_cursor_next_match` directly, not tuning this side — and note that an
-  incremental reparse would not help, since the query is re-enumerated over the whole
-  tree however little of it was re-parsed.
+  A 64 KB file of the densest markup is about 17 ms here. The cap is sized so that
+  a typical file at the cap stays well inside the time budget below on slower
+  hardware.
+- **A hostile or half-typed file is left plain, not frozen on.** The size cap
+  cannot bound the worst case, because the worst case is nesting depth and
+  unbalanced brackets — quadratic, and reachable from an ordinary file mid-edit:
+  unbounded, 64 KB of unclosed `<b>` costs 1.6 s per keystroke, 128 KB of nested
+  `:is(` costs 11.5 s, and 64,000 unclosed parens cost 3.9 s. So each parse and
+  each query runs under an **80 ms budget**; when it runs out the document is left
+  plain, not partially coloured, and colour returns on the next keystroke once the
+  text is parseable again. Measured, every one of those cases now lands at
+  80–96 ms. A document that is cut still pays the budget on every keystroke until
+  it is fixed — an incremental reparse would remove that, and is the next step
+  here.
 - **Minified files are not highlighted**, on the signal the editor already has: if a
   file's longest line forced wrapping off, one layout fragment covers the whole
   document and the validator would be handed every token in it at once.
@@ -305,7 +308,10 @@ under test: all four languages on real files, a single page carrying inline
 live typing, Dark mode re-resolving every colour with no code involved, a saved file
 byte-identical to what was typed, and opening then closing a highlighted document
 raising no unsaved-changes sheet — the last two being the properties the whole
-rendering-attributes design exists to protect.
+rendering-attributes design exists to protect. The time budget was checked the same
+way: a 49 KB page that the old cap excluded is coloured, and 64 KB of unclosed `<b>`
+— 1.6 s per keystroke unbounded — opens plain, takes typing, and the app stays
+responsive.
 
 **Seen once, not reproduced:** ⌘W closed a tab other than the selected one. It
 happened during scripted UI testing, with the intended tab selected and its title
@@ -321,10 +327,13 @@ Planned for the next version, in no particular order.
   and TypeScript ship; python, php, shell and java remain, in an order still to be
   decided. Each is an enum case, a vendored query directory and a package
   dependency — see [Syntax highlighting](#syntax-highlighting).
-- **Raising the highlighting size limits**, which needs the query-capture loop to go
-  through the C API — the measurements and the reasoning are in
-  [Syntax highlighting](#syntax-highlighting). This is now the single change that
-  would most improve the feature.
+- **Incremental reparse.** Every keystroke re-parses the whole document today. On
+  an ordinary file that is a few milliseconds and not worth the complexity; on a
+  file the time budget has cut it means paying the whole budget on every keystroke
+  until the text is fixed. tree-sitter's `ts_tree_edit` + `old_tree` path would
+  make the cost proportional to the edit. The hazard to design around is recorded
+  in `SyntaxParser`: `parse(tree:string:)`-style chunked reading splits surrogate
+  pairs, so the input must stay the whole UTF-16 buffer.
 
 Nothing else is planned for the next release.
 

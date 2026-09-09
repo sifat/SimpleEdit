@@ -102,7 +102,80 @@ public final class SyntaxParser {
 
     // MARK: - Tokenising
 
-    public func tokens(for source: String) -> SyntaxTokenList {
+    /// How long one call to `tokens(for:)` may run before it gives up.
+    ///
+    /// This is what actually bounds the worst case; the size caps in
+    /// `SyntaxLanguage` cannot, because the worst case is set by nesting depth
+    /// and unbalanced brackets, which are quadratic in a way no byte count
+    /// tracks. Measured in release: a 64 KB file of unclosed `<b>` tags takes
+    /// 1.6 s, 128 KB of nested `:is(` takes 11.5 s, 64,000 unclosed parens
+    /// take 3.9 s -- each of them per keystroke, on the main thread, and each
+    /// of them a shape an ordinary file passes through while being typed.
+    ///
+    /// 80 ms is chosen against two numbers. A typical file at its size cap
+    /// tokenises in 15-20 ms here, so there is 4x of headroom for slower
+    /// hardware before a legitimate file is cut. And 80 ms is the upper edge of
+    /// what a keystroke can cost before typing feels stuck rather than merely
+    /// heavy.
+    ///
+    /// When the budget runs out the document is left plain. Not partially
+    /// coloured: a query stopped halfway has captured the top of the file and
+    /// not the bottom, and a half-coloured document reads as broken where a
+    /// plain one reads as deliberate.
+    public static let defaultBudget: TimeInterval = 0.080
+
+    public func tokens(
+        for source: String,
+        budget: TimeInterval = SyntaxParser.defaultBudget
+    ) -> SyntaxTokenList {
+        var deadline = Deadline(after: budget)
+        return withUnsafeMutablePointer(to: &deadline) { deadline in
+            tokens(for: source, deadline: deadline) ?? .empty
+        }
+    }
+
+    /// One absolute deadline shared by every phase of a call -- parse, query,
+    /// and each child parser -- so that the phases cannot each spend the whole
+    /// budget in turn.
+    ///
+    /// Handed to tree-sitter as the `payload` of its progress callbacks, which
+    /// it invokes every hundred operations. `check()` is the only thing those
+    /// callbacks do, and it is one clock read.
+    private struct Deadline {
+        let uptimeNanoseconds: UInt64
+        /// Set the first time a callback observes the deadline passing, and
+        /// never cleared: it is what distinguishes "tree-sitter stopped because
+        /// we told it to" from "tree-sitter finished".
+        var exceeded = false
+
+        init(after budget: TimeInterval) {
+            // `UInt64(Double)` TRAPS on infinity, NaN and anything past
+            // UInt64.max, and `.infinity` is the obvious spelling for "no
+            // budget". So the budget is clamped first: NaN and negatives mean
+            // no time at all, and anything past an hour is treated as an hour,
+            // which is unlimited for any purpose this has. An hour in
+            // nanoseconds is 3.6e12, far inside the type, and &+ keeps the sum
+            // with the current uptime from ever wrapping.
+            let seconds = budget.isNaN ? 0 : min(max(0, budget), 3600)
+            let budgetNanoseconds = UInt64(seconds * 1_000_000_000)
+            uptimeNanoseconds = DispatchTime.now().uptimeNanoseconds &+ budgetNanoseconds
+        }
+
+        /// Returns true when the work should stop.
+        mutating func check() -> Bool {
+            if !exceeded, DispatchTime.now().uptimeNanoseconds > uptimeNanoseconds {
+                exceeded = true
+            }
+            return exceeded
+        }
+    }
+
+    /// Returns nil when the deadline passed before the work was finished, so a
+    /// caller can tell "no tokens" from "gave up".
+    private func tokens(
+        for source: String,
+        deadline: UnsafeMutablePointer<Deadline>
+    ) -> SyntaxTokenList? {
         // UTF-16 throughout, with no conversion anywhere: tree-sitter is told
         // the buffer is UTF-16LE, so a node's byte offset is exactly twice its
         // UTF-16 offset -- and UTF-16 offsets are what NSRange, NSTextStorage
@@ -110,39 +183,77 @@ public final class SyntaxParser {
         let units = Array(source.utf16)
         let text = source as NSString
 
-        return units.withUnsafeBufferPointer { buffer -> SyntaxTokenList in
-            guard let tree = Self.parse(buffer, with: parser) else { return .empty }
+        return units.withUnsafeBufferPointer { buffer -> SyntaxTokenList? in
+            guard let tree = Self.parse(buffer, with: parser, deadline: deadline) else {
+                // An empty document has no tree and is not a failure.
+                return deadline.pointee.exceeded ? nil : .empty
+            }
             defer { ts_tree_delete(tree) }
 
-            var tokens = captures(in: tree, text: text)
-            tokens += injectedTokens(in: tree, source: source, text: text)
+            guard var tokens = captures(in: tree, text: text, deadline: deadline) else {
+                return nil
+            }
+            tokens += injectedTokens(in: tree, text: text, deadline: deadline)
             return SyntaxTokenList(tokens)
         }
     }
 
-    private func captures(in tree: OpaquePointer, text: NSString) -> [SyntaxToken] {
+    // MARK: - Progress callbacks
+
+    /// `@convention(c)`, so it can capture nothing; the deadline arrives as the
+    /// payload tree-sitter hands back.
+    private static let parseProgress: @convention(c) (UnsafeMutablePointer<TSParseState>?) -> Bool = {
+        state in
+        guard let payload = state?.pointee.payload else { return false }
+        return payload.assumingMemoryBound(to: Deadline.self).pointee.check()
+    }
+
+    private static let queryProgress: @convention(c) (UnsafeMutablePointer<TSQueryCursorState>?) -> Bool = {
+        state in
+        guard let payload = state?.pointee.payload else { return false }
+        return payload.assumingMemoryBound(to: Deadline.self).pointee.check()
+    }
+
+    /// nil when the deadline passed mid-walk. A cancelled cursor has returned
+    /// the matches it reached and not the rest, so partial output is discarded
+    /// rather than shown.
+    private func captures(
+        in tree: OpaquePointer,
+        text: NSString,
+        deadline: UnsafeMutablePointer<Deadline>
+    ) -> [SyntaxToken]? {
         var tokens: [SyntaxToken] = []
         let root = ts_tree_root_node(tree)
-        ts_query_cursor_exec(cursor, query, root)
+        var options = TSQueryCursorOptions(
+            payload: UnsafeMutableRawPointer(deadline),
+            progress_callback: Self.queryProgress
+        )
 
-        var match = TSQueryMatch()
-        while ts_query_cursor_next_match(cursor, &match) {
-            let captures = UnsafeBufferPointer(
-                start: match.captures,
-                count: Int(match.capture_count)
-            )
-            guard passes(match: match, captures: captures, text: text, tests: tests)
-            else { continue }
+        // tree-sitter keeps the POINTER to the options, not a copy, and reads
+        // it on every next_match -- so the struct has to outlive the loop, not
+        // just the exec call. Hence the closure rather than a plain `&options`.
+        return withUnsafePointer(to: &options) { options -> [SyntaxToken]? in
+            ts_query_cursor_exec_with_options(cursor, query, root, options)
 
-            for capture in captures {
-                guard Int(capture.index) < kinds.count,
-                      let kind = kinds[Int(capture.index)],
-                      let range = Self.range(of: capture.node)
+            var match = TSQueryMatch()
+            while ts_query_cursor_next_match(cursor, &match) {
+                let captures = UnsafeBufferPointer(
+                    start: match.captures,
+                    count: Int(match.capture_count)
+                )
+                guard passes(match: match, captures: captures, text: text, tests: tests)
                 else { continue }
-                tokens.append(SyntaxToken(range: range, kind: kind))
+
+                for capture in captures {
+                    guard Int(capture.index) < kinds.count,
+                          let kind = kinds[Int(capture.index)],
+                          let range = Self.range(of: capture.node)
+                    else { continue }
+                    tokens.append(SyntaxToken(range: range, kind: kind))
+                }
             }
+            return deadline.pointee.exceeded ? nil : tokens
         }
-        return tokens
     }
 
     // MARK: - Predicates
@@ -294,13 +405,17 @@ public final class SyntaxParser {
     /// begins at the region's location in the document.
     private func injectedTokens(
         in tree: OpaquePointer,
-        source: String,
-        text: NSString
+        text: NSString,
+        deadline: UnsafeMutablePointer<Deadline>
     ) -> [SyntaxToken] {
-        guard let injections, let contentCapture = injections.contentCapture else { return [] }
+        guard let injections, let contentCapture = injections.contentCapture,
+              !deadline.pointee.exceeded
+        else { return [] }
 
         var injected: [SyntaxToken] = []
         let root = ts_tree_root_node(tree)
+        // The injections query itself is a handful of matches and is run
+        // without a callback; the deadline is enforced inside each child.
         ts_query_cursor_exec(injections.cursor, injections.query, root)
 
         var match = TSQueryMatch()
@@ -337,7 +452,16 @@ public final class SyntaxParser {
                       let child = childParser(for: language)
                 else { continue }
 
-                for token in child.tokens(for: text.substring(with: range)).tokens {
+                // A child that runs out of time leaves its region plain and
+                // the rest of the document coloured. Each parser's own result
+                // is all-or-nothing; the composite may be partial only at the
+                // granularity of a whole injected region.
+                guard let childTokens = child.tokens(
+                    for: text.substring(with: range),
+                    deadline: deadline
+                ) else { continue }
+
+                for token in childTokens.tokens {
                     injected.append(
                         SyntaxToken(
                             range: NSRange(
@@ -435,17 +559,66 @@ public final class SyntaxParser {
         }
     }
 
+    /// The buffer tree-sitter reads through. Its `read` callback is
+    /// `@convention(c)` and captures nothing, so the pointer and length travel
+    /// as the payload.
+    private struct InputBuffer {
+        let base: UnsafePointer<CChar>
+        let byteCount: UInt32
+    }
+
+    private static let readInput: @convention(c) (
+        UnsafeMutableRawPointer?, UInt32, TSPoint, UnsafeMutablePointer<UInt32>?
+    ) -> UnsafePointer<CChar>? = { payload, byteIndex, _, bytesRead in
+        guard let payload else {
+            bytesRead?.pointee = 0
+            return nil
+        }
+        let buffer = payload.assumingMemoryBound(to: InputBuffer.self).pointee
+        guard byteIndex < buffer.byteCount else {
+            bytesRead?.pointee = 0
+            return buffer.base + Int(buffer.byteCount)
+        }
+        bytesRead?.pointee = buffer.byteCount - byteIndex
+        return buffer.base + Int(byteIndex)
+    }
+
+    /// nil for an empty document, and nil when the deadline passed -- the
+    /// caller tells them apart through `deadline.exceeded`.
     private static func parse(
         _ units: UnsafeBufferPointer<UInt16>,
-        with parser: OpaquePointer
+        with parser: OpaquePointer,
+        deadline: UnsafeMutablePointer<Deadline>
     ) -> OpaquePointer? {
         // An empty document has no base address, and passing nil would be read
         // as "no input" rather than "no text".
         guard let base = units.baseAddress, !units.isEmpty else { return nil }
         return base.withMemoryRebound(to: CChar.self, capacity: units.count * 2) { chars in
-            ts_parser_parse_string_encoding(
-                parser, nil, chars, UInt32(units.count * 2), TSInputEncodingUTF16LE
-            )
+            var buffer = InputBuffer(base: chars, byteCount: UInt32(units.count * 2))
+            return withUnsafeMutablePointer(to: &buffer) { buffer in
+                let input = TSInput(
+                    payload: UnsafeMutableRawPointer(buffer),
+                    read: readInput,
+                    encoding: TSInputEncodingUTF16LE,
+                    decode: nil
+                )
+                let options = TSParseOptions(
+                    payload: UnsafeMutableRawPointer(deadline),
+                    progress_callback: parseProgress
+                )
+                let tree = ts_parser_parse_with_options(parser, nil, input, options)
+                if tree == nil {
+                    // MANDATORY after a cancelled parse. tree-sitter's contract
+                    // is that the next parse RESUMES where the cancelled one
+                    // stopped -- on the same parser, which is this document's
+                    // for its whole life. Without this, the keystroke after a
+                    // cancellation returns a tree from the previous text, with
+                    // node offsets past the end of the current one, and those
+                    // become token ranges handed straight to TextKit.
+                    ts_parser_reset(parser)
+                }
+                return tree
+            }
         }
     }
 
