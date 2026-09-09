@@ -70,37 +70,43 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
 
     /// Documents longer than this, in UTF-16 units, are not highlighted at all.
     ///
-    /// Per language because the cost is per language, and measured rather than
-    /// guessed. Tokenising runs synchronously on the keystroke path, so these
-    /// are chosen to hold the worst case near 60-80 ms:
+    /// The cap is NOT what bounds the worst case -- `SyntaxParser.defaultBudget`
+    /// is. A byte count cannot bound it: the worst case is set by nesting
+    /// depth and unbalanced brackets, both quadratic, and a file halfway
+    /// through being typed passes through those shapes routinely. The time
+    /// budget cuts such a document to plain at ~80 ms instead of freezing for
+    /// seconds; without it, these caps were half this size and still let a
+    /// 32 KB file of unclosed tags cost 400 ms per keystroke.
     ///
-    ///     JavaScript, library code       0.72 ms/KB
-    ///     CSS, real stylesheets          0.95 ms/KB
-    ///     CSS, synthetic dense           1.28 ms/KB
-    ///     JavaScript, dense component    2.31 ms/KB
-    ///     HTML, tag-dense markup         2.43 ms/KB
+    /// What the cap does bound is the *ordinary* cost paid on every keystroke,
+    /// and it is sized so that a typical file at the cap finishes well inside
+    /// the budget on hardware slower than this. Measured in release, which is
+    /// what the app ships (debug is 4-5x slower and was what an earlier
+    /// version of this table was measured in):
     ///
-    /// The spread is three-fold WITHIN a single language, and it is about token
-    /// density rather than file size: the cost is dominated by per-capture
-    /// allocation inside swift-tree-sitter, so what matters is how many
-    /// captures a KB produces. A file of long prose comments is cheap; a file
-    /// of short chained calls or of tiny nested tags is not.
+    ///     JavaScript, library code       0.07 ms/KB
+    ///     CSS, real stylesheets          0.12 ms/KB
+    ///     JavaScript, dense component    0.21 ms/KB
+    ///     HTML, markup with inline js    0.21 ms/KB
+    ///     TypeScript, dense              0.22 ms/KB
+    ///     HTML, tag-dense markup         0.26 ms/KB
     ///
-    /// CSS is the outlier that keeps 64 KB, and it earns it: real stylesheets
-    /// produce about half the captures per KB that dense markup or component
-    /// JavaScript do.
+    /// So a 64 KB file of the densest markup is ~17 ms here and perhaps 40 ms
+    /// on an old Intel machine -- half the budget, which is the headroom a
+    /// legitimate file needs so that it is never the one being cut.
     ///
-    /// Injections do NOT make HTML worse per KB, which is worth stating because
-    /// it is the opposite of what one expects: an inline script is less
-    /// capture-dense than the markup around it, so a page with a large
-    /// `<script>` measures *cheaper* per KB than the same page of pure markup.
-    /// HTML's cap is 32 KB because of its markup, not because of what it
-    /// embeds.
+    /// CSS gets the larger cap and earns it: real stylesheets produce about
+    /// half the captures per KB that dense markup does.
+    ///
+    /// Above the cap nothing is attempted, and that is deliberate rather than
+    /// lazy: a document that can never finish inside the budget would
+    /// otherwise pay the whole budget on every keystroke only to be cut each
+    /// time.
     public var maximumLength: Int {
         switch self {
         case .plain: 0
-        case .css: 64 * 1024
-        case .html, .javascript, .typescript: 32 * 1024
+        case .css: 128 * 1024
+        case .html, .javascript, .typescript: 64 * 1024
         }
     }
 

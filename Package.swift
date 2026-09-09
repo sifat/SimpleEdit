@@ -12,11 +12,13 @@ let package = Package(
     name: "SimpleEdit",
     platforms: [.macOS(.v14)],
     dependencies: [
-        // exact, not `from:`. swift-tree-sitter's tag 0.25.0 is numerically the
-        // highest but is CHRONOLOGICALLY OLDER (June 2025) than 0.10.0 (Feb
-        // 2026), so `from:` silently resolves to the older, less capable
-        // release. CotEditor pins the same way, for the same reason.
-        .package(url: "https://github.com/tree-sitter/swift-tree-sitter", exact: "0.10.0"),
+        // tree-sitter itself, and nothing on top of it. The Swift binding
+        // (swift-tree-sitter) was dropped once the query loop moved to the C
+        // API: it built a QueryCapture object per capture, which was most of
+        // the cost of highlighting -- see SyntaxParser. Nothing imports it any
+        // more, so carrying it would mean resolving and building a package the
+        // app does not use.
+        .package(url: "https://github.com/tree-sitter/tree-sitter", exact: "0.25.10"),
         .package(url: "https://github.com/tree-sitter/tree-sitter-html", exact: "0.23.2"),
         // 0.23.2 rather than the newer 0.25.0 on purpose: 0.25.0's manifest
         // decides whether to compile the external scanner with a RELATIVE
@@ -55,7 +57,7 @@ let package = Package(
         .target(
             name: "SyntaxCore",
             dependencies: [
-                .product(name: "SwiftTreeSitter", package: "swift-tree-sitter"),
+                .product(name: "TreeSitter", package: "tree-sitter"),
                 .product(name: "TreeSitterHTML", package: "tree-sitter-html"),
                 .product(name: "TreeSitterCSS", package: "tree-sitter-css"),
                 .product(name: "TreeSitterJavaScript", package: "tree-sitter-javascript"),
