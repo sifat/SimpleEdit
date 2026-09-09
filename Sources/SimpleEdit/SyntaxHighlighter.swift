@@ -9,7 +9,7 @@ import SyntaxCore
 /// Colour is applied through rendering attributes, never by mutating
 /// NSTextStorage, so it cannot reach undo, the edited flag or the save path.
 /// Verified: a highlighted document saves byte-identical.
-final class SyntaxHighlighter {
+final class SyntaxHighlighter: NSObject, NSTextStorageDelegate {
 
     private weak var textView: NSTextView?
     private let parser: SyntaxParser
@@ -48,7 +48,35 @@ final class SyntaxHighlighter {
         self.parser = parser
         self.language = language
         self.textView = textView
+        super.init()
         installValidator()
+
+        // Every change to the text, however it is made -- typing, paste, undo,
+        // Replace All, `textView.string = ...` -- goes through NSTextStorage,
+        // and didProcessEditing reports what ACTUALLY changed, after the fact.
+        // That is the property the incremental parse depends on: the tree is
+        // edited to match the text exactly as it is, never as an edit was
+        // intended to be.
+        textView.textStorage?.delegate = self
+    }
+
+    // MARK: - NSTextStorageDelegate
+
+    func textStorage(
+        _ textStorage: NSTextStorage,
+        didProcessEditing editedMask: NSTextStorageEditActions,
+        range editedRange: NSRange,
+        changeInLength delta: Int
+    ) {
+        // Attribute-only edits (the find bar's dimming, typing attributes)
+        // change no text and must not be reported as if they had.
+        guard editedMask.contains(.editedCharacters) else { return }
+        // editedRange is in the NEW text; the old text ended `delta` earlier.
+        parser.noteEdit(SyntaxParser.TextEdit(
+            start: editedRange.location,
+            oldEnd: NSMaxRange(editedRange) - delta,
+            newEnd: NSMaxRange(editedRange)
+        ))
     }
 
     // MARK: - Delivery
@@ -119,7 +147,13 @@ final class SyntaxHighlighter {
     // MARK: - Parsing
 
     /// Whole text arrived at once -- opened, reverted, or replaced by Format JSON.
+    ///
+    /// The text storage delegate has already reported the replacement as one
+    /// edit, so reusing the tree would be correct; but a wholesale replacement
+    /// shares nothing with what came before, and a fresh parse is the honest
+    /// cost.
     func documentTextDidArrive() {
+        parser.invalidate()
         reparse()
     }
 
@@ -131,12 +165,11 @@ final class SyntaxHighlighter {
     /// changed, so the stale colours would simply persist. Parsing here means
     /// the tokens are already correct by the time TextKit asks for them.
     ///
-    /// This is affordable because the document size is capped, and the cap is
-    /// what has to move if it ever stops being affordable. Note that an
-    /// incremental reparse would NOT help: the measurements behind
-    /// `maximumLength` put roughly 80% of the cost in enumerating query
-    /// captures, which happens over the whole tree however little of it was
-    /// re-parsed.
+    /// It is incremental: the parser has been told about every edit since the
+    /// last parse (see the text storage delegate above) and re-lexes only
+    /// around them. The highlights query still walks the whole tree, so the
+    /// cost of a keystroke is now the query rather than the parse; the time
+    /// budget bounds both.
     func textDidChange() {
         reparse()
     }
@@ -146,6 +179,7 @@ final class SyntaxHighlighter {
         let source = textView.string
         guard (source as NSString).length <= language.maximumLength else {
             tokens = .empty
+            parser.invalidate()
             return
         }
         tokens = parser.tokens(for: source)

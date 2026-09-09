@@ -25,8 +25,9 @@ public final class SyntaxParser {
     private let queriesRoot: URL
 
     // Owned C objects: these three are released in deinit, and `injections`
-    // (which owns a second query and cursor) is disposed there too. The tree
-    // from each parse is freed at the end of the call that made it.
+    // (which owns a second query and cursor) is disposed there too. A
+    // top-level parser also retains its last tree between calls (see `tree`);
+    // a child's tree is freed at the end of the call that made it.
     //
     // The TSLanguage is deliberately NOT stored and must never be freed:
     // tree_sitter_html() and friends return a pointer to a function-static, so
@@ -47,6 +48,30 @@ public final class SyntaxParser {
     private let injections: InjectionQuery?
     /// Built on first use and kept, because building one compiles a query.
     private var children: [SyntaxLanguage: SyntaxParser] = [:]
+
+    /// Only a document's own parser keeps a tree between calls. A child
+    /// parses a substring that moves and changes wholesale with every edit of
+    /// the document around it, so there is nothing for it to reuse.
+    private let isTopLevel: Bool
+
+    /// The last tree this parser produced, with every edit reported since
+    /// applied to it through `ts_tree_edit`, so the next parse can reuse the
+    /// subtrees the edits did not touch. nil until the first parse and after
+    /// `invalidate()`.
+    private var tree: OpaquePointer?
+    /// The document length, in bytes, that `tree` currently describes. Kept
+    /// in step by `noteEdit` and compared against the real length before
+    /// every reuse -- the cheap check that catches an edit nobody reported.
+    private var treeByteCount = 0
+    /// Whether any edit has been reported since the tree was last built. The
+    /// tree is reused ONLY when this is true: a caller that reports its edits
+    /// has told us what changed, and a caller that reports nothing may have
+    /// changed anything. Without this, `tokens(for:)` would reuse a stale tree
+    /// whenever two different texts happened to have the same length -- which
+    /// is not a corner case, it is every keystroke that overtypes a selection
+    /// of the same size. Found by the differential test, in the test's own
+    /// reference parser.
+    private var editsSinceParse = false
 
     /// Returns nil if the grammar or its query cannot be loaded, so a missing or
     /// broken query file degrades to plain text. Never traps: the query is read
@@ -73,6 +98,7 @@ public final class SyntaxParser {
 
         self.language = language
         self.queriesRoot = queriesRoot
+        self.isTopLevel = allowsInjections
         self.parser = parser
         self.query = query
         self.cursor = cursor
@@ -94,10 +120,100 @@ public final class SyntaxParser {
     }
 
     deinit {
+        if let tree { ts_tree_delete(tree) }
         ts_query_cursor_delete(cursor)
         ts_query_delete(query)
         ts_parser_delete(parser)
         injections?.dispose()
+    }
+
+    // MARK: - Edits
+
+    /// One replacement, in UTF-16 units of the document: the text between
+    /// `start` and `oldEnd` was replaced by text ending at `newEnd`.
+    public struct TextEdit: Equatable, Sendable {
+        public let start: Int
+        public let oldEnd: Int
+        public let newEnd: Int
+
+        public init(start: Int, oldEnd: Int, newEnd: Int) {
+            self.start = start
+            self.oldEnd = oldEnd
+            self.newEnd = newEnd
+        }
+    }
+
+    /// Reports an edit that has already happened to the text, so that the next
+    /// `tokens(for:)` can reuse the parts of the last tree the edit did not
+    /// touch. Edits are cumulative: report every one, in order, in the
+    /// coordinates of the text as it was just after that edit -- which is
+    /// exactly what NSTextStorage's `didProcessEditing` supplies.
+    ///
+    /// Only the byte offsets are given to tree-sitter; the row/column points
+    /// are left at zero. That is safe here and would not be everywhere: every
+    /// decision in tree-sitter's node reuse is made on `.bytes` (the points in
+    /// parser.c appear only in its log lines), and nothing in this pipeline
+    /// ever reads a node's point. `IncrementalParseTests` pins it directly: a
+    /// parser given real points and one given zeros produce the same tokens
+    /// through the same random edits.
+    ///
+    /// What the tests require of the result: on text that parses cleanly, the
+    /// tokens are identical to a fresh parse of the same text; on text with
+    /// syntax errors they may differ, because tree-sitter may recover from an
+    /// error differently when reusing a tree than when starting cold -- both
+    /// are valid parses of broken text -- and once the error is fixed the two
+    /// agree again. Reuse is safe across that because tree-sitter only reuses
+    /// a subtree when the parser is in the same state it was originally parsed
+    /// in, and never reuses one that has been edited.
+    public func noteEdit(_ edit: TextEdit) {
+        noteEdit(edit, start: TSPoint(row: 0, column: 0),
+                 oldEnd: TSPoint(row: 0, column: 0), newEnd: TSPoint(row: 0, column: 0))
+    }
+
+    /// Internal so a test can hand tree-sitter REAL points and check whether
+    /// they make any difference to the tokens. They do not; see `noteEdit`.
+    func noteEdit(_ edit: TextEdit, start: TSPoint, oldEnd: TSPoint, newEnd: TSPoint) {
+        guard isTopLevel, let tree else { return }
+        guard edit.start >= 0, edit.start <= edit.oldEnd, edit.start <= edit.newEnd,
+              edit.oldEnd * 2 <= treeByteCount
+        else {
+            // An edit that cannot describe this text means the caller and the
+            // tree have already disagreed; better to start over than to guess.
+            invalidate()
+            return
+        }
+
+        var input = TSInputEdit(
+            start_byte: UInt32(edit.start * 2),
+            old_end_byte: UInt32(edit.oldEnd * 2),
+            new_end_byte: UInt32(edit.newEnd * 2),
+            start_point: start,
+            old_end_point: oldEnd,
+            new_end_point: newEnd
+        )
+        ts_tree_edit(tree, &input)
+        treeByteCount += (edit.newEnd - edit.oldEnd) * 2
+        editsSinceParse = true
+    }
+
+    /// Whether the last retained tree contains syntax errors. Internal, for the
+    /// tests that define what "identical to a fresh parse" may be required of:
+    /// tree-sitter guarantees it only for text that parses cleanly. On text
+    /// with errors an incremental parse may recover differently from a fresh
+    /// one -- both are valid parses of broken text -- and the tests check
+    /// convergence instead: once the error is fixed, the trees agree again.
+    var hasSyntaxErrors: Bool {
+        guard let tree else { return false }
+        return ts_node_has_error(ts_tree_root_node(tree))
+    }
+
+    /// Forgets the retained tree, so the next parse starts from scratch. For
+    /// text that arrived some way other than through reported edits.
+    public func invalidate() {
+        if let tree { ts_tree_delete(tree) }
+        tree = nil
+        treeByteCount = 0
+        editsSinceParse = false
     }
 
     // MARK: - Tokenising
@@ -184,18 +300,51 @@ public final class SyntaxParser {
         let text = source as NSString
 
         return units.withUnsafeBufferPointer { buffer -> SyntaxTokenList? in
-            guard let tree = Self.parse(buffer, with: parser, deadline: deadline) else {
-                // An empty document has no tree and is not a failure.
-                return deadline.pointee.exceeded ? nil : .empty
-            }
-            defer { ts_tree_delete(tree) }
+            let byteCount = buffer.count * 2
 
-            guard var tokens = captures(in: tree, text: text, deadline: deadline) else {
-                return nil
+            // The retained tree is reused only if (a) at least one edit has
+            // been reported since it was built -- see `editsSinceParse` -- and
+            // (b) it describes text of exactly this length. Every reported
+            // edit keeps `treeByteCount` in step, so a mismatch means an edit
+            // went unreported, and a tree that is out of step would put every
+            // token after the discrepancy on the wrong text.
+            if tree != nil, !editsSinceParse || treeByteCount != byteCount { invalidate() }
+
+            guard let newTree = Self.parse(buffer, with: parser, oldTree: tree, deadline: deadline)
+            else {
+                if deadline.pointee.exceeded {
+                    // The edited old tree is kept: the edits it carries are
+                    // real, and the next keystroke can still reuse it.
+                    return nil
+                }
+                // An empty document has no tree and is not a failure.
+                invalidate()
+                return .empty
             }
-            tokens += injectedTokens(in: tree, text: text, deadline: deadline)
-            return SyntaxTokenList(tokens)
+
+            if isTopLevel {
+                if let old = tree { ts_tree_delete(old) }
+                tree = newTree
+                treeByteCount = byteCount
+                editsSinceParse = false
+                return tokens(in: newTree, text: text, deadline: deadline)
+            } else {
+                defer { ts_tree_delete(newTree) }
+                return tokens(in: newTree, text: text, deadline: deadline)
+            }
         }
+    }
+
+    private func tokens(
+        in tree: OpaquePointer,
+        text: NSString,
+        deadline: UnsafeMutablePointer<Deadline>
+    ) -> SyntaxTokenList? {
+        guard var tokens = captures(in: tree, text: text, deadline: deadline) else {
+            return nil
+        }
+        tokens += injectedTokens(in: tree, text: text, deadline: deadline)
+        return SyntaxTokenList(tokens)
     }
 
     // MARK: - Progress callbacks
@@ -588,6 +737,7 @@ public final class SyntaxParser {
     private static func parse(
         _ units: UnsafeBufferPointer<UInt16>,
         with parser: OpaquePointer,
+        oldTree: OpaquePointer?,
         deadline: UnsafeMutablePointer<Deadline>
     ) -> OpaquePointer? {
         // An empty document has no base address, and passing nil would be read
@@ -606,7 +756,11 @@ public final class SyntaxParser {
                     payload: UnsafeMutableRawPointer(deadline),
                     progress_callback: parseProgress
                 )
-                let tree = ts_parser_parse_with_options(parser, nil, input, options)
+                // With an old tree, tree-sitter re-lexes only around the
+                // reported edits and reuses every subtree they did not touch.
+                // The old tree is neither modified nor consumed; the new one
+                // shares its untouched subtrees by reference count.
+                let tree = ts_parser_parse_with_options(parser, oldTree, input, options)
                 if tree == nil {
                     // MANDATORY after a cancelled parse. tree-sitter's contract
                     // is that the next parse RESUMES where the cancelled one
