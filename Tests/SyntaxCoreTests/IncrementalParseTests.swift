@@ -192,6 +192,13 @@ struct IncrementalParseTests {
         return true
     }
 
+    /// Every non-cancelling parse in a walk runs under this rather than the
+    /// default budget. The walks are heavy, `swift test` builds debug, and the
+    /// suites run in parallel; a parser cut by the wall clock returns an empty
+    /// list, which would then be reported as a divergence that is not one.
+    /// The budget's own behaviour is tested in TimeBudgetTests.
+    private static let ample: TimeInterval = 30
+
     private func runDifferential(
         _ language: SyntaxLanguage, seed: UInt64, initial: String, edits: Int,
         cancelEvery: Int = 0
@@ -201,8 +208,8 @@ struct IncrementalParseTests {
         let fresh = try parser(language)
         var text = initial
         var rng = Random(state: seed)
-        _ = incremental.tokens(for: text)
-        _ = withPoints.tokens(for: text)
+        _ = incremental.tokens(for: text, budget: Self.ample)
+        _ = withPoints.tokens(for: text, budget: Self.ample)
         var cleanChecks = 0
         // A random walk that only ever inserts brackets and quotes almost
         // never returns to clean text on its own, so it moves in bursts: a
@@ -231,9 +238,9 @@ struct IncrementalParseTests {
                 _ = withPoints.tokens(for: text, budget: 0)
                 continue
             }
-            let got = incremental.tokens(for: text)
-            let pointed = withPoints.tokens(for: text)
-            let want = fresh.tokens(for: text)
+            let got = incremental.tokens(for: text, budget: Self.ample)
+            let pointed = withPoints.tokens(for: text, budget: Self.ample)
+            let want = fresh.tokens(for: text, budget: Self.ample)
 
             // Points never change the outcome, errors or not.
             #expect(got == pointed, "seed \(seed) edit \(i): real points changed the tokens")
@@ -310,15 +317,15 @@ struct IncrementalParseTests {
             let at = min(offset, ns.length)
             let p = try parser(language)
             let fresh = try parser(language)
-            _ = p.tokens(for: original)
+            _ = p.tokens(for: original, budget: Self.ample)
 
             let broken = ns.replacingCharacters(in: NSRange(location: at, length: 0), with: snippet)
             p.noteEdit(SyntaxParser.TextEdit(start: at, oldEnd: at, newEnd: at + snippet.utf16.count))
-            #expect(isWellFormed(p.tokens(for: broken), in: broken))
+            #expect(isWellFormed(p.tokens(for: broken, budget: Self.ample), in: broken))
 
             p.noteEdit(SyntaxParser.TextEdit(start: at, oldEnd: at + snippet.utf16.count, newEnd: at))
             #expect(
-                p.tokens(for: original) == fresh.tokens(for: original),
+                p.tokens(for: original, budget: Self.ample) == fresh.tokens(for: original, budget: Self.ample),
                 "\(language.rawValue): after inserting and removing \(snippet) at \(at), the parses disagree"
             )
         }
