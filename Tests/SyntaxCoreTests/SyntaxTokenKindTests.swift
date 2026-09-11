@@ -119,4 +119,19 @@ struct SyntaxTokenKindTests {
         #expect(SyntaxTokenKind(captureName: "property", in: .shell) == .property)
         #expect(SyntaxTokenKind(captureName: "function", in: .shell) == .function)
     }
+
+    /// Three Java rows that each correct a place the shared table would get
+    /// Java wrong, and each stays scoped to Java.
+    @Test("Java's overrides, and that they stay Java's")
+    func javaOverrides() {
+        #expect(SyntaxTokenKind(captureName: "function.method", in: .java) == .function)
+        #expect(SyntaxTokenKind(captureName: "function.method", in: .javascript) == .property)
+        #expect(SyntaxTokenKind(captureName: "variable.builtin", in: .java) == .keyword)
+        #expect(SyntaxTokenKind(captureName: "variable.builtin", in: .javascript) == nil)
+        #expect(SyntaxTokenKind(captureName: "function.builtin", in: .java) == .keyword)
+        #expect(SyntaxTokenKind(captureName: "function.builtin", in: .python) == .function)
+        #expect(SyntaxTokenKind(captureName: "type.builtin", in: .java) == .type)
+        #expect(SyntaxTokenKind(captureName: "variable", in: .java) == nil)
+        #expect(SyntaxTokenKind(captureName: "string.escape", in: .java) == .string)
+    }
 }

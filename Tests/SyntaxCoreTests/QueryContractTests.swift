@@ -51,6 +51,11 @@ struct QueryContractTests {
             "comment", "constant", "embedded", "function", "keyword", "number",
             "operator", "property", "string",
         ],
+        .java: [
+            "attribute", "comment", "constant", "constant.builtin", "function.builtin",
+            "function.method", "keyword", "number", "operator", "string",
+            "string.escape", "type", "type.builtin", "variable", "variable.builtin",
+        ],
     ]
 
     /// Captures a language emits and this app deliberately does not colour.
@@ -64,6 +69,7 @@ struct QueryContractTests {
         // mapping could ever be seen; leaving it unmapped says so.
         .python: ["variable", "constructor", "embedded", "escape"],
         .shell: ["embedded"],
+        .java: ["variable"],
     ]
 
     /// Reads every file the language composes its query from, not just its own

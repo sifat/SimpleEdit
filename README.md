@@ -3,15 +3,16 @@
 A small native macOS text editor. Swift + AppKit + `NSDocument`, built with SwiftPM,
 wrapped into a `.app` by a shell script. No Electron, no xcodeproj, no xib.
 
-Seven third-party dependencies, all pinned to exact versions, all for syntax
+Eight third-party dependencies, all pinned to exact versions, all for syntax
 highlighting, and **all of them C**:
 [`tree-sitter`](https://github.com/tree-sitter/tree-sitter) itself plus the
 [HTML](https://github.com/tree-sitter/tree-sitter-html),
 [CSS](https://github.com/tree-sitter/tree-sitter-css),
 [JavaScript](https://github.com/tree-sitter/tree-sitter-javascript),
 [TypeScript](https://github.com/tree-sitter/tree-sitter-typescript),
-[Python](https://github.com/tree-sitter/tree-sitter-python) and
-[Bash](https://github.com/tree-sitter/tree-sitter-bash) grammars. There is
+[Python](https://github.com/tree-sitter/tree-sitter-python),
+[Bash](https://github.com/tree-sitter/tree-sitter-bash) and
+[Java](https://github.com/tree-sitter/tree-sitter-java) grammars. There is
 no Swift binding in between — the query loop talks to the C API directly, because the
 binding allocated an object per capture and that was most of the cost of highlighting.
 Each grammar's highlight query is vendored into `Resources/Queries/` under its MIT
@@ -164,9 +165,9 @@ matches, and the Replace disclosure reveals a `Replace` button (one at a time) a
 ## Syntax highlighting
 
 **HTML** (`.html`, `.htm`), **CSS** (`.css`), **JavaScript** (`.js`, `.mjs`, `.cjs`),
-**TypeScript** (`.ts`, `.mts`, `.cts`), **Python** (`.py`, `.pyi`, `.pyw`) and
+**TypeScript** (`.ts`, `.mts`, `.cts`), **Python** (`.py`, `.pyi`, `.pyw`),
 **Shell** (`.sh`, `.bash`, `.zsh`, `.command`, and dotfiles such as `.zshrc` and
-`.bashrc`) are coloured. Nothing else is, and nothing needs turning on: the language
+`.bashrc`) and **Java** (`.java`) are coloured. Nothing else is, and nothing needs turning on: the language
 is detected from the file name when the document opens — a known dotfile name first,
 then the extension.
 
@@ -206,7 +207,8 @@ measurements behind it, are in [Escape hatches](#escape-hatches).
 | Mismatched closing tag | orange |
 
 Plain identifiers are **not** coloured, in any language — variables, parameters, and
-in JavaScript and Python class names too. That is a deliberate consequence of how overlapping
+in JavaScript and Python class names too. Java is the exception for class names: its
+grammar knows a type from where it appears, so they are coloured there. That is a deliberate consequence of how overlapping
 captures are resolved, and `Resources/Queries/javascript/SOURCE.md` explains it: the
 grammar captures every identifier, and that capture collides with several others over
 the same range, so colouring it would make the winner a sort tie-break rather than a
@@ -235,12 +237,14 @@ capture fails the suite instead of silently un-colouring something.
 
   | | |
   | --- | --- |
+  | Java, JDK and Android sources | 0.07–0.14 ms/KB |
   | JavaScript, library code | 0.07 ms/KB |
   | CSS, real stylesheets | 0.12 ms/KB |
   | Shell, real bash scripts | 0.10–0.16 ms/KB |
   | Python, standard library | 0.14–0.20 ms/KB |
   | JavaScript, dense component code | 0.21 ms/KB |
   | HTML, tag-dense markup | 0.26 ms/KB |
+  | Java, dense streams and lambdas | 0.32 ms/KB |
   | Shell, dense bash | 0.38 ms/KB |
   | Python, dense comprehensions | 0.49 ms/KB |
 
@@ -249,6 +253,7 @@ capture fails the suite instead of silently un-colouring something.
   hardware. Python is the awkward case: real Python is cheap and real Python files
   are often large, but dense Python is the most expensive code measured in any
   language, so it keeps the 64 KB cap and big standard-library modules stay plain.
+  Java makes the same trade: large JDK files such as `HashMap.java` stay plain.
 - **A hostile or half-typed file is left plain, not frozen on.** The size cap
   cannot bound the worst case, because the worst case is nesting depth and
   unbalanced brackets — quadratic, and reachable from an ordinary file mid-edit:
@@ -356,7 +361,7 @@ bug in how Close routes through the responder chain.
 Planned for the next version, in no particular order.
 
 - **More languages for syntax highlighting**, one at a time. HTML, CSS, JavaScript,
-  TypeScript, Python and Shell ship; php, java and sql remain. Each is an enum case, a
+  TypeScript, Python, Shell and Java ship; php and sql remain. Each is an enum case, a
   vendored query directory and a package dependency — see
   [Syntax highlighting](#syntax-highlighting). SQL is the odd one out: there is no
   grammar under the tree-sitter organisation, so it would be the first dependency

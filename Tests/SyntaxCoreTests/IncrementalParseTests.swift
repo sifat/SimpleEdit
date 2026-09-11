@@ -128,6 +128,8 @@ struct IncrementalParseTests {
         "    ", "\t", ":\n    ", "def g():", "f\"{x}\"", "lambda y: y", "@deco",
         // Shell: heredoc openers and closers, substitutions, quoting.
         "<<EOF\n", "\nEOF\n", "$(", "${", "<(", "2>&1", "; then", "\nfi", "-la", "|",
+        // Java: generics, annotations, block comments, character literals.
+        "<T>", "@Override\n", "/** doc */", "'c'", "new List<>()", "public static ",
     ]
 
     /// tree-sitter points: row is the number of newlines before the offset,
@@ -339,6 +341,33 @@ struct IncrementalParseTests {
     @Test("Shell survives random edits", arguments: [81, 82, 83, 84] as [UInt64])
     func shell(seed: UInt64) throws {
         try runDifferential(.shell, seed: seed, initial: Self.shell, edits: 150)
+    }
+
+    private static let java = """
+    package com.sifat.cart;
+
+    import java.util.ArrayList;
+    import java.util.List;
+
+    /** Cart totals. */
+    public final class Cart<T extends Item> {
+        private static final double TAX_RATE = 0.0825;
+        private final List<T> items = new ArrayList<>();
+
+        @Override
+        public String toString() { return "Cart(" + items.size() + ")"; }
+
+        public double total() {
+            double sum = 0;
+            for (T item : items) { sum += item.price() * (1 + TAX_RATE); }
+            return this.round(sum);
+        }
+    }
+    """
+
+    @Test("Java survives random edits", arguments: [91, 92, 93] as [UInt64])
+    func java(seed: UInt64) throws {
+        try runDifferential(.java, seed: seed, initial: Self.java, edits: 150)
     }
 
     @Test("CSS survives random edits", arguments: [31, 32, 33] as [UInt64])

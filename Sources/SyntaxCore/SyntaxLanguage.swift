@@ -13,6 +13,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
     case typescript
     case python
     case shell
+    case java
 
     public var title: String {
         switch self {
@@ -23,6 +24,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         case .typescript: "TypeScript"
         case .python: "Python"
         case .shell: "Shell"
+        case .java: "Java"
         }
     }
 
@@ -38,6 +40,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         case .typescript: 4
         case .python: 5
         case .shell: 6
+        case .java: 7
         }
     }
 
@@ -65,6 +68,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         // zsh-only constructs such as glob qualifiers become error nodes and
         // stay plain -- and `.command` is macOS's double-clickable script.
         case .shell: ["sh", "bash", "zsh", "command"]
+        case .java: ["java"]
         }
     }
 
@@ -123,6 +127,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
     /// what the app ships (debug is 4-5x slower and was what an earlier
     /// version of this table was measured in):
     ///
+    ///     Java, JDK and Android sources  0.07-0.14 ms/KB
     ///     JavaScript, library code       0.07 ms/KB
     ///     CSS, real stylesheets          0.12 ms/KB
     ///     Shell, real bash scripts       0.10-0.16 ms/KB
@@ -131,6 +136,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
     ///     HTML, markup with inline js    0.21 ms/KB
     ///     TypeScript, dense              0.22 ms/KB
     ///     HTML, tag-dense markup         0.26 ms/KB
+    ///     Java, dense streams and lambdas 0.32 ms/KB
     ///     Shell, zsh-specific syntax     0.37 ms/KB
     ///     Shell, dense bash              0.38 ms/KB
     ///     Python, dense comprehensions   0.49 ms/KB
@@ -142,7 +148,10 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
     /// ordinary code measured in any language, and at 128 KB it would cost
     /// 63 ms here -- close enough to the budget that slower hardware would cut
     /// a legitimate file. So it caps at 64 KB with the others, and large
-    /// standard-library modules stay plain. The comment on
+    /// standard-library modules stay plain. Java makes the same trade for the
+    /// same reason: real Java is the cheapest code measured anywhere, but dense
+    /// Java at 128 KB is 40 ms, so JDK files such as HashMap.java (95 KB) stay
+    /// plain too. The comment on
     /// `SyntaxParser.defaultBudget` is why that trade goes this way round.
     ///
     /// So a 64 KB file of the densest markup is ~17 ms here and perhaps 40 ms
@@ -160,7 +169,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         switch self {
         case .plain: 0
         case .css: 128 * 1024
-        case .html, .javascript, .typescript, .python, .shell: 64 * 1024
+        case .html, .javascript, .typescript, .python, .shell, .java: 64 * 1024
         }
     }
 
@@ -233,6 +242,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         case .typescript: "typescript"
         case .python: "python"
         case .shell: "bash"
+        case .java: "java"
         }
     }
 }
