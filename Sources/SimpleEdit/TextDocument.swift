@@ -88,6 +88,19 @@ final class TextDocument: NSDocument {
         return TextFileIO.encode(storage.decoded)
     }
 
+    /// NSDocument's revert replaces this document's storage but knows nothing
+    /// about the view showing the old text, and the editor deliberately loads
+    /// its text only once. Without this override the view kept the stale text --
+    /// and since data(ofType:) commits textView.string on the way out, the next
+    /// save wrote that stale text straight back over the file the user had just
+    /// reverted. Reproduced: revert, then Cmd-S, and the edit reappeared on disk.
+    override func revert(toContentsOf url: URL, ofType typeName: String) throws {
+        try super.revert(toContentsOf: url, ofType: typeName)
+        if let editor = windowControllers.first?.contentViewController as? EditorViewController {
+            editor.reloadDocumentText()
+        }
+    }
+
     // MARK: - Printing
 
     /// Prints a throwaway text view built for the paper, never the one on screen.
