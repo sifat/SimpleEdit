@@ -52,6 +52,9 @@ let package = Package(
         // for swift-tree-sitter `from: "0.25.0"`, the tag that is older than
         // 0.10.0; test-only and pruned, but not a thing to invite.
         .package(url: "https://github.com/tree-sitter/tree-sitter-bash", exact: "0.23.3"),
+        // 0.23.5 is the newest tag there is. Java has no external scanner, so
+        // the scanner hazard the other pins guard against cannot arise here.
+        .package(url: "https://github.com/tree-sitter/tree-sitter-java", exact: "0.23.5"),
     ],
     targets: [
         // Foundation only, no AppKit — so `swift test` can cover the parts where a
@@ -77,6 +80,7 @@ let package = Package(
                 .product(name: "TreeSitterTypeScript", package: "tree-sitter-typescript"),
                 .product(name: "TreeSitterPython", package: "tree-sitter-python"),
                 .product(name: "TreeSitterBash", package: "tree-sitter-bash"),
+                .product(name: "TreeSitterJava", package: "tree-sitter-java"),
             ],
             swiftSettings: swiftSettings
         ),

@@ -124,6 +124,33 @@ public enum SyntaxTokenKind: String, Sendable, CaseIterable {
         .shell: [
             "embedded": nil,
         ],
+        // Java differs from JavaScript in three ways, and each is a place the
+        // shared table would colour Java wrongly.
+        //
+        // - `function.method` is shared as `.property`, because in JavaScript
+        //   it always coincides with a `@property` capture. Java's query has no
+        //   `@property` at all: a method declaration or call is captured ONLY
+        //   as `function.method`, so under the shared row every method name
+        //   in a Java file would be blue rather than a function.
+        // - `type` is a type name, as in TypeScript and Python; the shared row
+        //   is CSS's unit.
+        // - `variable.builtin` is only `this`, and `function.builtin` only
+        //   `super`. Both are keywords in Java, and neither node is captured by
+        //   anything else, so colouring them as keywords cannot create a tie.
+        //   Left to the shared table, `this` would be plain (it inherits
+        //   `variable`) and `super` indigo.
+        //
+        // `variable` is the blanket `(identifier)` capture, unmapped as
+        // everywhere. Unlike JavaScript and Python, Java class names ARE
+        // coloured: the grammar captures them as `@type` from their position,
+        // not from a capitalisation guess.
+        .java: [
+            "variable": nil,
+            "variable.builtin": .keyword,
+            "function.builtin": .keyword,
+            "function.method": .function,
+            "type": .type,
+        ],
     ]
 
     /// The union of every vendored query's capture names. Adding a language

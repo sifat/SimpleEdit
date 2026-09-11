@@ -3,6 +3,7 @@ import TreeSitter
 import TreeSitterBash
 import TreeSitterCSS
 import TreeSitterHTML
+import TreeSitterJava
 import TreeSitterJavaScript
 import TreeSitterPython
 import TreeSitterTypeScript
@@ -681,6 +682,7 @@ public final class SyntaxParser {
         case .typescript: tree_sitter_typescript()
         case .python: tree_sitter_python()
         case .shell: tree_sitter_bash()
+        case .java: tree_sitter_java()
         }
     }
 

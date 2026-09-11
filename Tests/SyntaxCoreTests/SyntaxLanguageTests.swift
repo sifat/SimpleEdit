@@ -44,6 +44,7 @@ struct SyntaxLanguageTests {
         // The case is named for what the user sees; the directory for the
         // grammar that actually parses it.
         #expect(SyntaxLanguage.shell.queryDirectoryName == "bash")
+        #expect(SyntaxLanguage.java.queryDirectoryName == "java")
     }
 
     @Test("JavaScript is detected by extension, module variants included")
@@ -107,6 +108,16 @@ struct SyntaxLanguageTests {
                 #expect(seen.insert(name).inserted, "\(name) is claimed twice")
             }
         }
+    }
+
+    @Test("Java is detected by extension")
+    func javaExtensions() {
+        #expect(SyntaxLanguage(fileExtension: "java") == .java)
+        #expect(SyntaxLanguage(fileExtension: "JAVA") == .java)
+        #expect(SyntaxLanguage(fileName: "Cart.java") == .java)
+        // Compiled classes and archives are not source.
+        #expect(SyntaxLanguage(fileExtension: "class") == nil)
+        #expect(SyntaxLanguage(fileExtension: "jar") == nil)
     }
 
     /// The cap is a measured number, and a language that has a grammar but no
