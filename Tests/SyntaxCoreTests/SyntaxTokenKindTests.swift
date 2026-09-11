@@ -97,4 +97,17 @@ struct SyntaxTokenKindTests {
         #expect(SyntaxTokenKind(captureName: "constructor", in: .css) == nil)
         #expect(SyntaxTokenKind(captureName: "property", in: .javascript) == .property)
     }
+
+    /// Python reads `type`, `variable` and `constructor` the way TypeScript
+    /// does, and `type` still means a unit in CSS.
+    @Test("Python's overrides match TypeScript's and stay scoped")
+    func pythonOverrides() {
+        #expect(SyntaxTokenKind(captureName: "type", in: .python) == .type)
+        #expect(SyntaxTokenKind(captureName: "type", in: .css) == .constant)
+        #expect(SyntaxTokenKind(captureName: "variable", in: .python) == nil)
+        #expect(SyntaxTokenKind(captureName: "constructor", in: .python) == nil)
+        #expect(SyntaxTokenKind(captureName: "escape", in: .python) == nil)
+        #expect(SyntaxTokenKind(captureName: "function.builtin", in: .python) == .function)
+        #expect(SyntaxTokenKind(captureName: "punctuation.special", in: .python) == .punctuation)
+    }
 }

@@ -39,6 +39,7 @@ struct SyntaxLanguageTests {
         #expect(SyntaxLanguage.html.queryDirectoryName == "html")
         #expect(SyntaxLanguage.css.queryDirectoryName == "css")
         #expect(SyntaxLanguage.javascript.queryDirectoryName == "javascript")
+        #expect(SyntaxLanguage.python.queryDirectoryName == "python")
     }
 
     @Test("JavaScript is detected by extension, module variants included")
@@ -50,6 +51,16 @@ struct SyntaxLanguageTests {
         // Not jsx: that needs the grammar's separate highlights-jsx.scm, which
         // this app does not vendor.
         #expect(SyntaxLanguage(fileExtension: "jsx") == nil)
+    }
+
+    @Test("Python is detected by extension, stubs and windowed scripts included")
+    func pythonExtensions() {
+        #expect(SyntaxLanguage(fileExtension: "py") == .python)
+        #expect(SyntaxLanguage(fileExtension: "pyi") == .python)
+        #expect(SyntaxLanguage(fileExtension: "pyw") == .python)
+        #expect(SyntaxLanguage(fileExtension: "PY") == .python)
+        // Compiled bytecode is not source.
+        #expect(SyntaxLanguage(fileExtension: "pyc") == nil)
     }
 
     /// The cap is a measured number, and a language that has a grammar but no

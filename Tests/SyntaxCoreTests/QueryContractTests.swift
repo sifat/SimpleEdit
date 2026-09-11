@@ -41,6 +41,12 @@ struct QueryContractTests {
             "punctuation.special", "string", "string.special", "variable",
             "variable.builtin", "type", "type.builtin", "variable.parameter",
         ],
+        .python: [
+            "comment", "constant", "constant.builtin", "constructor", "embedded",
+            "escape", "function", "function.builtin", "function.method", "keyword",
+            "number", "operator", "property", "punctuation.special", "string",
+            "type", "variable",
+        ],
     ]
 
     /// Captures a language emits and this app deliberately does not colour.
@@ -50,6 +56,9 @@ struct QueryContractTests {
     private static let deliberatelyUnmapped: [SyntaxLanguage: Set<String>] = [
         .javascript: ["variable", "variable.builtin", "constructor", "embedded"],
         .typescript: ["variable", "variable.builtin", "variable.parameter", "constructor", "embedded"],
+        // `escape` is nested inside `(string)`, which covers it whole, so no
+        // mapping could ever be seen; leaving it unmapped says so.
+        .python: ["variable", "constructor", "embedded", "escape"],
     ]
 
     /// Reads every file the language composes its query from, not just its own

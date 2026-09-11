@@ -39,6 +39,10 @@ let package = Package(
         // this repo, so the scanner hazard above does not arise; both targets
         // list their scanner.c unconditionally.
         .package(url: "https://github.com/tree-sitter/tree-sitter-typescript", exact: "0.23.2"),
+        // 0.23.6, not 0.25.0: the same relative-path scanner hazard as the
+        // grammars above, and Python's external scanner is what handles
+        // indentation, so losing it would break nearly every file.
+        .package(url: "https://github.com/tree-sitter/tree-sitter-python", exact: "0.23.6"),
     ],
     targets: [
         // Foundation only, no AppKit — so `swift test` can cover the parts where a
@@ -62,6 +66,7 @@ let package = Package(
                 .product(name: "TreeSitterCSS", package: "tree-sitter-css"),
                 .product(name: "TreeSitterJavaScript", package: "tree-sitter-javascript"),
                 .product(name: "TreeSitterTypeScript", package: "tree-sitter-typescript"),
+                .product(name: "TreeSitterPython", package: "tree-sitter-python"),
             ],
             swiftSettings: swiftSettings
         ),
