@@ -44,7 +44,39 @@ public struct SyntaxTokenList: Sendable, Equatable {
             if left.range.location != right.range.location {
                 return left.range.location < right.range.location
             }
-            return left.range.length > right.range.length
+            if left.range.length != right.range.length {
+                return left.range.length > right.range.length
+            }
+            // Two tokens over the IDENTICAL range: the first one kept wins, so
+            // the order here is a decision, and it used to be an accident --
+            // Swift's sort is not stable, so the winner was whichever an
+            // unstable sort happened to leave first.
+            //
+            // The rule is that weaker evidence loses. Two kinds are weak:
+            //
+            // - `.punctuation`, because a token that is punctuation AND
+            //   something else is that something else. CSS's `*` is captured
+            //   as both an operator and a universal selector; it is a selector,
+            //   and colours as one.
+            // - `.constant`, because the only way a constant ties with another
+            //   kind is through a naming-convention guess -- `^[A-Z][A-Z_]*$`
+            //   on an identifier -- while `.type`, `.function` and `.property`
+            //   come from the identifier's syntactic position. Literal
+            //   constants (numbers, `true`, the doctype) never share a range
+            //   with anything. The cases that forced it: Python's single-letter
+            //   type variable, `T` in `def f(x: T) -> T`, and JavaScript's
+            //   `const MIN_SIZE = () => 1`, which is a function.
+            //
+            // Measured against the previous behaviour over every token in fifty
+            // real stylesheets and the JS, TS and HTML fixtures: the only output
+            // that changed is the JavaScript case above.
+            let leftRank = left.kind.tieRank
+            let rightRank = right.kind.tieRank
+            if leftRank != rightRank { return leftRank > rightRank }
+            // Ties between two strong kinds do not occur in any vendored
+            // grammar. They are ordered by name only so that the result never
+            // depends on the order captures happened to arrive in.
+            return left.kind.rawValue < right.kind.rawValue
         }
 
         var kept: [SyntaxToken] = []
@@ -92,5 +124,17 @@ public struct SyntaxTokenList: Sendable, Equatable {
         }
 
         return tokens[first..<low]
+    }
+}
+
+extension SyntaxTokenKind {
+    /// How much a kind is to be believed when it shares an identical range with
+    /// another. Higher wins. See `SyntaxTokenList.init`.
+    fileprivate var tieRank: Int {
+        switch self {
+        case .punctuation: 0
+        case .constant: 1
+        default: 2
+        }
     }
 }

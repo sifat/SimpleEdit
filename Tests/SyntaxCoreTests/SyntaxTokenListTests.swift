@@ -59,4 +59,41 @@ struct SyntaxTokenListTests {
         #expect(list.tokens(in: NSRange(location: 10, length: 0)).isEmpty)
         #expect(SyntaxTokenList.empty.tokens(in: NSRange(location: 0, length: 10)).isEmpty)
     }
+
+    /// Two tokens over the identical range: the winner is a decision. A
+    /// constant that ties comes from a naming-convention guess, so position
+    /// evidence (`.type`, `.function`) beats it -- in either input order.
+    @Test("On an identical range, a constant loses")
+    func constantLosesTies() {
+        for kind in [SyntaxTokenKind.type, .function, .property] {
+            #expect(SyntaxTokenList([token(0, 1, .constant), token(0, 1, kind)]).tokens.map(\.kind) == [kind])
+            #expect(SyntaxTokenList([token(0, 1, kind), token(0, 1, .constant)]).tokens.map(\.kind) == [kind])
+        }
+    }
+
+    /// A token that is punctuation AND something else is that something else:
+    /// CSS's universal selector `*` is also captured as an operator.
+    @Test("On an identical range, punctuation loses, even to a constant")
+    func punctuationLosesTies() {
+        #expect(SyntaxTokenList([token(0, 1, .punctuation), token(0, 1, .tag)]).tokens.map(\.kind) == [.tag])
+        #expect(SyntaxTokenList([token(0, 1, .tag), token(0, 1, .punctuation)]).tokens.map(\.kind) == [.tag])
+        #expect(SyntaxTokenList([token(0, 1, .punctuation), token(0, 1, .constant)]).tokens.map(\.kind) == [.constant])
+    }
+
+    /// Ties between two strong kinds do not occur in any vendored grammar, but
+    /// if one did the result must not depend on capture arrival order.
+    @Test("Any remaining tie is independent of input order")
+    func tiesAreDeterministic() {
+        let a = SyntaxTokenList([token(0, 3, .keyword), token(0, 3, .function)])
+        let b = SyntaxTokenList([token(0, 3, .function), token(0, 3, .keyword)])
+        #expect(a == b)
+    }
+
+    /// The rule only breaks ties. Outermost-wins is untouched: a longer token
+    /// still swallows a shorter one inside it, whatever their kinds.
+    @Test("Ranks never override outermost-wins")
+    func ranksOnlyBreakTies() {
+        let list = SyntaxTokenList([token(0, 4, .constant), token(2, 2, .type)])
+        #expect(list.tokens.map(\.kind) == [.constant])
+    }
 }

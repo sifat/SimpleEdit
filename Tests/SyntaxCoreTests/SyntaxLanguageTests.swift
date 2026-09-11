@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import SyntaxCore
 
@@ -39,6 +40,10 @@ struct SyntaxLanguageTests {
         #expect(SyntaxLanguage.html.queryDirectoryName == "html")
         #expect(SyntaxLanguage.css.queryDirectoryName == "css")
         #expect(SyntaxLanguage.javascript.queryDirectoryName == "javascript")
+        #expect(SyntaxLanguage.python.queryDirectoryName == "python")
+        // The case is named for what the user sees; the directory for the
+        // grammar that actually parses it.
+        #expect(SyntaxLanguage.shell.queryDirectoryName == "bash")
     }
 
     @Test("JavaScript is detected by extension, module variants included")
@@ -50,6 +55,58 @@ struct SyntaxLanguageTests {
         // Not jsx: that needs the grammar's separate highlights-jsx.scm, which
         // this app does not vendor.
         #expect(SyntaxLanguage(fileExtension: "jsx") == nil)
+    }
+
+    @Test("Python is detected by extension, stubs and windowed scripts included")
+    func pythonExtensions() {
+        #expect(SyntaxLanguage(fileExtension: "py") == .python)
+        #expect(SyntaxLanguage(fileExtension: "pyi") == .python)
+        #expect(SyntaxLanguage(fileExtension: "pyw") == .python)
+        #expect(SyntaxLanguage(fileExtension: "PY") == .python)
+        // Compiled bytecode is not source.
+        #expect(SyntaxLanguage(fileExtension: "pyc") == nil)
+    }
+
+    @Test("Shell scripts are detected by extension")
+    func shellExtensions() {
+        for ext in ["sh", "bash", "zsh", "command", "SH"] {
+            #expect(SyntaxLanguage(fileExtension: ext) == .shell, "\(ext)")
+        }
+    }
+
+    /// The reason `init?(fileName:)` exists. A dotfile's path extension is the
+    /// empty string, so extension-only detection missed every one of these --
+    /// the shell files a text editor is most likely to be pointed at.
+    @Test("Shell dotfiles are detected by name, though they have no extension")
+    func shellDotfiles() {
+        for name in [".zshrc", ".bashrc", ".bash_profile", ".profile", ".zprofile", ".zshenv"] {
+            #expect((name as NSString).pathExtension.isEmpty, "\(name) unexpectedly has an extension")
+            #expect(SyntaxLanguage(fileName: name) == .shell, "\(name)")
+        }
+        #expect(SyntaxLanguage(fileName: ".ZSHRC") == .shell)
+    }
+
+    @Test("Detection by name falls back to the extension")
+    func fileNameFallsBackToExtension() {
+        #expect(SyntaxLanguage(fileName: "deploy.sh") == .shell)
+        #expect(SyntaxLanguage(fileName: "index.html") == .html)
+        #expect(SyntaxLanguage(fileName: "types.d.ts") == .typescript)
+        // Nothing to go on at all.
+        #expect(SyntaxLanguage(fileName: "Makefile") == nil)
+        #expect(SyntaxLanguage(fileName: ".gitignore") == nil)
+        #expect(SyntaxLanguage(fileName: "") == nil)
+        // A name that merely contains a dotfile's name is not that dotfile.
+        #expect(SyntaxLanguage(fileName: "my.zshrc.backup") == nil)
+    }
+
+    @Test("No file name is claimed by two languages")
+    func fileNamesAreUnique() {
+        var seen: Set<String> = []
+        for language in SyntaxLanguage.allCases {
+            for name in language.fileNames {
+                #expect(seen.insert(name).inserted, "\(name) is claimed twice")
+            }
+        }
     }
 
     /// The cap is a measured number, and a language that has a grammar but no

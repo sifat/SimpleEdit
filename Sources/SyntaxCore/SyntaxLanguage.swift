@@ -11,6 +11,8 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
     case css
     case javascript
     case typescript
+    case python
+    case shell
 
     public var title: String {
         switch self {
@@ -19,6 +21,8 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         case .css: "CSS"
         case .javascript: "JavaScript"
         case .typescript: "TypeScript"
+        case .python: "Python"
+        case .shell: "Shell"
         }
     }
 
@@ -32,6 +36,8 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         case .css: 2
         case .javascript: 3
         case .typescript: 4
+        case .python: 5
+        case .shell: 6
         }
     }
 
@@ -53,7 +59,40 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         // Not "tsx": that needs the JSX query as a third fragment, and this
         // app does not vendor it.
         case .typescript: ["ts", "mts", "cts"]
+        // .pyi is a typed stub and .pyw a windowed script; both are plain Python.
+        case .python: ["py", "pyi", "pyw"]
+        // The grammar is Bash. zsh files parse well enough for highlighting --
+        // zsh-only constructs such as glob qualifiers become error nodes and
+        // stay plain -- and `.command` is macOS's double-clickable script.
+        case .shell: ["sh", "bash", "zsh", "command"]
         }
+    }
+
+    /// Files recognised by their whole name, because they have no extension.
+    ///
+    /// `URL.pathExtension` of `.zshrc` is the empty string -- a leading dot is
+    /// not an extension separator -- so detection by extension alone misses
+    /// every shell dotfile, which are the shell files a text editor is most
+    /// likely to be pointed at. Matched case-insensitively, like extensions.
+    public var fileNames: [String] {
+        switch self {
+        case .shell:
+            [".bashrc", ".bash_profile", ".bash_login", ".bash_logout", ".bash_aliases",
+             ".profile", ".zshrc", ".zshenv", ".zprofile", ".zlogin", ".zlogout"]
+        default: []
+        }
+    }
+
+    /// Detection from a file's name: an exact whole-name match first, then the
+    /// extension. This is what the editor calls; `init?(fileExtension:)` is
+    /// the second half of it.
+    public init?(fileName: String) {
+        let normalised = fileName.lowercased()
+        if let match = Self.allCases.first(where: { $0.fileNames.contains(normalised) }) {
+            self = match
+            return
+        }
+        self.init(fileExtension: (fileName as NSString).pathExtension)
     }
 
     /// Detection is by extension alone. It cannot be by document type:
@@ -86,10 +125,25 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
     ///
     ///     JavaScript, library code       0.07 ms/KB
     ///     CSS, real stylesheets          0.12 ms/KB
+    ///     Shell, real bash scripts       0.10-0.16 ms/KB
+    ///     Python, standard library       0.14-0.20 ms/KB
     ///     JavaScript, dense component    0.21 ms/KB
     ///     HTML, markup with inline js    0.21 ms/KB
     ///     TypeScript, dense              0.22 ms/KB
     ///     HTML, tag-dense markup         0.26 ms/KB
+    ///     Shell, zsh-specific syntax     0.37 ms/KB
+    ///     Shell, dense bash              0.38 ms/KB
+    ///     Python, dense comprehensions   0.49 ms/KB
+    ///
+    /// Python is the awkward one. Real Python is cheap -- in CSS territory --
+    /// and real Python files are often large: argparse.py is 100 KB, typing.py
+    /// 130 KB. On that evidence alone it would earn CSS's 128 KB. But dense
+    /// Python, all comprehensions and short names, is the most expensive
+    /// ordinary code measured in any language, and at 128 KB it would cost
+    /// 63 ms here -- close enough to the budget that slower hardware would cut
+    /// a legitimate file. So it caps at 64 KB with the others, and large
+    /// standard-library modules stay plain. The comment on
+    /// `SyntaxParser.defaultBudget` is why that trade goes this way round.
     ///
     /// So a 64 KB file of the densest markup is ~17 ms here and perhaps 40 ms
     /// on an old Intel machine -- half the budget, which is the headroom a
@@ -106,7 +160,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         switch self {
         case .plain: 0
         case .css: 128 * 1024
-        case .html, .javascript, .typescript: 64 * 1024
+        case .html, .javascript, .typescript, .python, .shell: 64 * 1024
         }
     }
 
@@ -177,6 +231,8 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         case .css: "css"
         case .javascript: "javascript"
         case .typescript: "typescript"
+        case .python: "python"
+        case .shell: "bash"
         }
     }
 }

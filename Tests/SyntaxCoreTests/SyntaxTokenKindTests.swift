@@ -97,4 +97,26 @@ struct SyntaxTokenKindTests {
         #expect(SyntaxTokenKind(captureName: "constructor", in: .css) == nil)
         #expect(SyntaxTokenKind(captureName: "property", in: .javascript) == .property)
     }
+
+    /// Python reads `type`, `variable` and `constructor` the way TypeScript
+    /// does, and `type` still means a unit in CSS.
+    @Test("Python's overrides match TypeScript's and stay scoped")
+    func pythonOverrides() {
+        #expect(SyntaxTokenKind(captureName: "type", in: .python) == .type)
+        #expect(SyntaxTokenKind(captureName: "type", in: .css) == .constant)
+        #expect(SyntaxTokenKind(captureName: "variable", in: .python) == nil)
+        #expect(SyntaxTokenKind(captureName: "constructor", in: .python) == nil)
+        #expect(SyntaxTokenKind(captureName: "escape", in: .python) == nil)
+        #expect(SyntaxTokenKind(captureName: "function.builtin", in: .python) == .function)
+        #expect(SyntaxTokenKind(captureName: "punctuation.special", in: .python) == .punctuation)
+    }
+
+    @Test("Shell's captures land on existing kinds, and embedded stays unmapped")
+    func shellCaptures() {
+        #expect(SyntaxTokenKind(captureName: "embedded", in: .shell) == nil)
+        #expect(SyntaxTokenKind(captureName: "number", in: .shell) == .constant)
+        #expect(SyntaxTokenKind(captureName: "operator", in: .shell) == .punctuation)
+        #expect(SyntaxTokenKind(captureName: "property", in: .shell) == .property)
+        #expect(SyntaxTokenKind(captureName: "function", in: .shell) == .function)
+    }
 }

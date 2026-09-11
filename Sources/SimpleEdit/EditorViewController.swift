@@ -158,14 +158,15 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
         highlighter?.documentTextDidArrive()
     }
 
-    /// Detection is by file extension: EditorDocumentController reports every
-    /// document as `public.text` so extensionless files open at all, so the
-    /// document type carries no language information by the time we get here.
-    /// An untitled document has no URL and stays plain until it is saved.
+    /// Detection is by file name -- a known whole name such as `.zshrc` first,
+    /// then the extension. EditorDocumentController reports every document as
+    /// `public.text` so extensionless files open at all, so the document type
+    /// carries no language information by the time we get here. An untitled
+    /// document has no URL and stays plain until it is saved.
     private func installHighlighterIfNeeded() {
         guard highlighter == nil else { return }
         guard let url = document?.fileURL,
-              let language = SyntaxLanguage(fileExtension: url.pathExtension)
+              let language = SyntaxLanguage(fileName: url.lastPathComponent)
         else { return }
 
         // Wrapping is force-disabled for documents with an enormous single

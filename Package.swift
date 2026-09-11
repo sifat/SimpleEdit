@@ -39,6 +39,19 @@ let package = Package(
         // this repo, so the scanner hazard above does not arise; both targets
         // list their scanner.c unconditionally.
         .package(url: "https://github.com/tree-sitter/tree-sitter-typescript", exact: "0.23.2"),
+        // 0.23.6, not 0.25.0: the same relative-path scanner hazard as the
+        // grammars above, and Python's external scanner is what handles
+        // indentation, so losing it would break nearly every file.
+        .package(url: "https://github.com/tree-sitter/tree-sitter-python", exact: "0.23.6"),
+        // 0.23.3, deliberately not 0.25.1 -- and not for the scanner reason the
+        // others give: Bash's 0.25 manifests list scanner.c unconditionally, so
+        // that hazard does not arise. highlights.scm is byte-identical between
+        // the two tags, so the only difference is the parser, and 0.25.1's is
+        // ABI 15 where every other grammar here is ABI 14. A new compatibility
+        // surface bought for no highlighting difference. Its manifest also asks
+        // for swift-tree-sitter `from: "0.25.0"`, the tag that is older than
+        // 0.10.0; test-only and pruned, but not a thing to invite.
+        .package(url: "https://github.com/tree-sitter/tree-sitter-bash", exact: "0.23.3"),
     ],
     targets: [
         // Foundation only, no AppKit — so `swift test` can cover the parts where a
@@ -62,6 +75,8 @@ let package = Package(
                 .product(name: "TreeSitterCSS", package: "tree-sitter-css"),
                 .product(name: "TreeSitterJavaScript", package: "tree-sitter-javascript"),
                 .product(name: "TreeSitterTypeScript", package: "tree-sitter-typescript"),
+                .product(name: "TreeSitterPython", package: "tree-sitter-python"),
+                .product(name: "TreeSitterBash", package: "tree-sitter-bash"),
             ],
             swiftSettings: swiftSettings
         ),
