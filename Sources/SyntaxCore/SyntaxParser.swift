@@ -246,9 +246,16 @@ public final class SyntaxParser {
     ) -> SyntaxTokenList {
         var deadline = Deadline(after: budget)
         return withUnsafeMutablePointer(to: &deadline) { deadline in
-            tokens(for: source, deadline: deadline) ?? .empty
+            let result = tokens(for: source, deadline: deadline)
+            lastCallWasCut = result == nil
+            return result ?? .empty
         }
     }
+
+    /// Whether the most recent `tokens(for:)` gave up because its budget ran
+    /// out. An empty result alone cannot say: an empty document is empty too.
+    /// The highlighter uses this to space out retries -- see `CutBackoff`.
+    public private(set) var lastCallWasCut = false
 
     /// One absolute deadline shared by every phase of a call -- parse, query,
     /// and each child parser -- so that the phases cannot each spend the whole

@@ -15,6 +15,8 @@ final class SyntaxHighlighter: NSObject, NSTextStorageDelegate {
     private let parser: SyntaxParser
     private let language: SyntaxLanguage
     private var tokens: SyntaxTokenList = .empty
+    /// Spaces out attempts after the budget cuts one. See `CutBackoff`.
+    private var backoff = CutBackoff()
 
     /// Two limits protect the keystroke path, and they do different jobs.
     ///
@@ -154,6 +156,7 @@ final class SyntaxHighlighter: NSObject, NSTextStorageDelegate {
     /// cost.
     func documentTextDidArrive() {
         parser.invalidate()
+        backoff.reset()
         reparse()
     }
 
@@ -176,6 +179,9 @@ final class SyntaxHighlighter: NSObject, NSTextStorageDelegate {
 
     private func reparse() {
         guard let textView else { return }
+        // After a cut, most keystrokes do no work at all: the document stays
+        // plain, and an attempt is made only when the backoff allows one.
+        guard backoff.shouldAttempt() else { return }
         let source = textView.string
         guard (source as NSString).length <= language.maximumLength else {
             tokens = .empty
@@ -183,5 +189,6 @@ final class SyntaxHighlighter: NSObject, NSTextStorageDelegate {
             return
         }
         tokens = parser.tokens(for: source)
+        backoff.record(cut: parser.lastCallWasCut)
     }
 }

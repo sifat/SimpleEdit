@@ -247,9 +247,12 @@ capture fails the suite instead of silently un-colouring something.
   each query runs under an **80 ms budget**; when it runs out the document is left
   plain, not partially coloured, and colour returns on the next keystroke once the
   text is parseable again. Measured, every one of those cases now lands at
-  80–96 ms. A document that is cut still pays the budget on every keystroke until
-  it is fixed: the incremental parse cannot help it, because a document that has
-  never parsed inside the budget has no tree to reuse.
+  80–96 ms. The incremental parse cannot help a document that is cut, because a
+  document that has never parsed inside the budget has no tree to reuse — so after
+  a cut, attempts are spaced out instead: the next keystroke is skipped, then three,
+  then seven, and from there one keystroke in eight is tried. A hostile document
+  costs about a tenth of the budget per keystroke rather than all of it, and colour
+  returns within eight keystrokes of the text becoming parseable again.
 - **A large inline `<script>` or `<style>` is re-parsed in full on every keystroke.**
   The document's own parse is incremental; the embedded languages are parsed from
   their substring each time, because that substring moves and changes wholesale with
