@@ -47,6 +47,10 @@ struct QueryContractTests {
             "number", "operator", "property", "punctuation.special", "string",
             "type", "variable",
         ],
+        .shell: [
+            "comment", "constant", "embedded", "function", "keyword", "number",
+            "operator", "property", "string",
+        ],
     ]
 
     /// Captures a language emits and this app deliberately does not colour.
@@ -59,6 +63,7 @@ struct QueryContractTests {
         // `escape` is nested inside `(string)`, which covers it whole, so no
         // mapping could ever be seen; leaving it unmapped says so.
         .python: ["variable", "constructor", "embedded", "escape"],
+        .shell: ["embedded"],
     ]
 
     /// Reads every file the language composes its query from, not just its own

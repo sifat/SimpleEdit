@@ -115,6 +115,15 @@ public enum SyntaxTokenKind: String, Sendable, CaseIterable {
             "embedded": nil,
             "type": .type,
         ],
+        // Shell needs no overrides except this one, and even this one is
+        // already the default -- nothing in the shared table claims `embedded`.
+        // It is written out because the capture covers a whole `$(...)`,
+        // `<(...)` or `${...}` including the command inside it, and outermost-
+        // wins means mapping it would swallow that command. Explicit here, a
+        // future shared row for `embedded` cannot reach it by accident.
+        .shell: [
+            "embedded": nil,
+        ],
     ]
 
     /// The union of every vendored query's capture names. Adding a language
