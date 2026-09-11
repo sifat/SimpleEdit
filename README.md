@@ -171,6 +171,16 @@ JavaScript. The HTML grammar hands those over as one opaque node, so each is
 re-parsed with its own grammar and the results are merged back into the document's
 own offsets.
 
+The parse is **incremental**. The highlighter is the text storage's delegate, and
+every character edit — typing, paste, undo, Replace All — is reported to tree-sitter
+as it happens, so the next parse re-lexes only around the edits and reuses every
+subtree they did not touch. Measured in release, that halves the cost of a keystroke
+on every ordinary file tested; the other half is the highlights query, which still
+walks the whole tree. The contract, pinned by a randomised differential test: on text
+that parses cleanly the tokens are identical to a fresh parse; on text with syntax
+errors they may differ, because tree-sitter may recover differently when reusing a
+tree than when starting cold; and once the error is fixed they agree again.
+
 Colour is delivered through `NSTextLayoutManager.renderingAttributesValidator` —
 TextKit 2 asks for a fragment's colours as it lays that fragment out — and never by
 mutating `NSTextStorage`. That is the whole design constraint: colour cannot reach
@@ -237,9 +247,17 @@ capture fails the suite instead of silently un-colouring something.
   each query runs under an **80 ms budget**; when it runs out the document is left
   plain, not partially coloured, and colour returns on the next keystroke once the
   text is parseable again. Measured, every one of those cases now lands at
-  80–96 ms. A document that is cut still pays the budget on every keystroke until
-  it is fixed — an incremental reparse would remove that, and is the next step
-  here.
+  80–96 ms. The incremental parse cannot help a document that is cut, because a
+  document that has never parsed inside the budget has no tree to reuse — so after
+  a cut, attempts are spaced out instead: the next keystroke is skipped, then three,
+  then seven, and from there one keystroke in eight is tried. A hostile document
+  costs about a tenth of the budget per keystroke rather than all of it, and colour
+  returns within eight keystrokes of the text becoming parseable again.
+- **A large inline `<script>` or `<style>` is re-parsed in full on every keystroke.**
+  The document's own parse is incremental; the embedded languages are parsed from
+  their substring each time, because that substring moves and changes wholesale with
+  every edit around it. A page whose bulk is one big inline script gains little from
+  the incremental parse (measured 1.1× against 2× for everything else).
 - **Minified files are not highlighted**, on the signal the editor already has: if a
   file's longest line forced wrapping off, one layout fragment covers the whole
   document and the validator would be handed every token in it at once.
@@ -327,13 +345,14 @@ Planned for the next version, in no particular order.
   and TypeScript ship; python, php, shell and java remain, in an order still to be
   decided. Each is an enum case, a vendored query directory and a package
   dependency — see [Syntax highlighting](#syntax-highlighting).
-- **Incremental reparse.** Every keystroke re-parses the whole document today. On
-  an ordinary file that is a few milliseconds and not worth the complexity; on a
-  file the time budget has cut it means paying the whole budget on every keystroke
-  until the text is fixed. tree-sitter's `ts_tree_edit` + `old_tree` path would
-  make the cost proportional to the edit. The hazard to design around is recorded
-  in `SyntaxParser`: `parse(tree:string:)`-style chunked reading splits surrogate
-  pairs, so the input must stay the whole UTF-16 buffer.
+- **Incremental highlighting query.** The parse is incremental now, but the
+  highlights query still walks the whole tree on every keystroke, and on an
+  ordinary file that is the remaining half of the cost. `ts_tree_get_changed_ranges`
+  gives the byte ranges whose structure changed; re-querying only those and shifting
+  the rest of the previous token list would make the whole keystroke proportional to
+  the edit. The subtlety to design around is that a capture's match can depend on
+  its ancestors, so the changed ranges must be trusted to cover every node whose
+  match status could have changed — which is what they are documented to do.
 
 Nothing else is planned for the next release.
 

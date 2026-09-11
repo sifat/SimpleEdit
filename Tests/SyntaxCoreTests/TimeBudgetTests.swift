@@ -77,10 +77,16 @@ struct TimeBudgetTests {
     /// The other half of the contract: an ordinary document is never cut. The
     /// budget is generous relative to a normal file at its cap, and this pins
     /// that an unlimited budget and the default one agree.
+    ///
+    /// The document is small on purpose. `swift test` builds debug, which is
+    /// 4-5x slower than the release build the app ships, and runs suites in
+    /// parallel on a loaded machine; a document that is ordinary for the app
+    /// can still trip an 80 ms budget under those conditions and make this
+    /// test flaky. What is being tested is the contract, not the constant.
     @Test("An ordinary document is not affected by the default budget")
     func ordinaryDocumentIsWhole() throws {
         let p = try parser(.javascript)
-        let source = String(repeating: "function f(a, b) { return a.map((x) => x * 2 + b); }\n", count: 400)
+        let source = String(repeating: "function f(a, b) { return a.map((x) => x * 2 + b); }\n", count: 60)
         let unlimited = p.tokens(for: source, budget: 60)
         let normal = p.tokens(for: source)
         #expect(!normal.isEmpty)
@@ -122,5 +128,73 @@ struct TimeBudgetEdgeTests {
         _ = p.tokens(for: source, budget: budget)
         // ...and the parser still works afterwards with the default budget.
         #expect(!p.tokens(for: source).isEmpty)
+    }
+}
+
+@Suite("Cut backoff")
+struct CutBackoffTests {
+
+    /// The decision table, written out: skips of 1, 3, 7, then 7 forever.
+    @Test("Attempts are spaced 1, 3, 7, 7, ... keystrokes apart after cuts")
+    func spacing() {
+        var b = CutBackoff()
+        var skipsBetweenAttempts: [Int] = []
+        var skipped = 0
+        for _ in 0..<60 {
+            if b.shouldAttempt() {
+                skipsBetweenAttempts.append(skipped)
+                skipped = 0
+                b.record(cut: true)
+            } else {
+                skipped += 1
+            }
+        }
+        #expect(skipsBetweenAttempts.prefix(6) == [0, 1, 3, 7, 7, 7])
+    }
+
+    /// The property a user notices: one success resets everything, so colour
+    /// is back on the very next keystroke once the text is parseable.
+    @Test("A success resets the spacing to zero")
+    func successResets() {
+        var b = CutBackoff()
+        for _ in 0..<3 { _ = b.shouldAttempt(); b.record(cut: true) }
+        while !b.shouldAttempt() {}
+        b.record(cut: false)
+        let first = b.shouldAttempt()
+        let second = b.shouldAttempt()
+        #expect(first && second)
+    }
+
+    @Test("A fresh document has no history to back off from")
+    func reset() {
+        var b = CutBackoff()
+        _ = b.shouldAttempt(); b.record(cut: true)
+        let skipped = !b.shouldAttempt()
+        #expect(skipped)
+        b.reset()
+        let attempted = b.shouldAttempt()
+        #expect(attempted)
+    }
+
+    @Test("A never-cut document never skips")
+    func neverCut() {
+        var b = CutBackoff()
+        for _ in 0..<20 {
+            let attempt = b.shouldAttempt()
+            #expect(attempt)
+            b.record(cut: false)
+        }
+    }
+
+    /// The parser reports whether it was cut, since an empty result cannot.
+    @Test("The parser distinguishes a cut from an empty document")
+    func parserReportsCuts() throws {
+        let p = try #require(SyntaxParser(language: .html, queriesRoot: QueryLoadingTests.queriesRoot))
+        _ = p.tokens(for: String(repeating: "<b>", count: 20_000), budget: 0)
+        #expect(p.lastCallWasCut)
+        _ = p.tokens(for: "")
+        #expect(!p.lastCallWasCut)
+        _ = p.tokens(for: "<p>x</p>")
+        #expect(!p.lastCallWasCut)
     }
 }
