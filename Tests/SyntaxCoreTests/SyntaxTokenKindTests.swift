@@ -110,4 +110,13 @@ struct SyntaxTokenKindTests {
         #expect(SyntaxTokenKind(captureName: "function.builtin", in: .python) == .function)
         #expect(SyntaxTokenKind(captureName: "punctuation.special", in: .python) == .punctuation)
     }
+
+    @Test("Shell's captures land on existing kinds, and embedded stays unmapped")
+    func shellCaptures() {
+        #expect(SyntaxTokenKind(captureName: "embedded", in: .shell) == nil)
+        #expect(SyntaxTokenKind(captureName: "number", in: .shell) == .constant)
+        #expect(SyntaxTokenKind(captureName: "operator", in: .shell) == .punctuation)
+        #expect(SyntaxTokenKind(captureName: "property", in: .shell) == .property)
+        #expect(SyntaxTokenKind(captureName: "function", in: .shell) == .function)
+    }
 }

@@ -3,14 +3,15 @@
 A small native macOS text editor. Swift + AppKit + `NSDocument`, built with SwiftPM,
 wrapped into a `.app` by a shell script. No Electron, no xcodeproj, no xib.
 
-Six third-party dependencies, all pinned to exact versions, all for syntax
+Seven third-party dependencies, all pinned to exact versions, all for syntax
 highlighting, and **all of them C**:
 [`tree-sitter`](https://github.com/tree-sitter/tree-sitter) itself plus the
 [HTML](https://github.com/tree-sitter/tree-sitter-html),
 [CSS](https://github.com/tree-sitter/tree-sitter-css),
 [JavaScript](https://github.com/tree-sitter/tree-sitter-javascript),
-[TypeScript](https://github.com/tree-sitter/tree-sitter-typescript) and
-[Python](https://github.com/tree-sitter/tree-sitter-python) grammars. There is
+[TypeScript](https://github.com/tree-sitter/tree-sitter-typescript),
+[Python](https://github.com/tree-sitter/tree-sitter-python) and
+[Bash](https://github.com/tree-sitter/tree-sitter-bash) grammars. There is
 no Swift binding in between — the query loop talks to the C API directly, because the
 binding allocated an object per capture and that was most of the cost of highlighting.
 Each grammar's highlight query is vendored into `Resources/Queries/` under its MIT
@@ -163,10 +164,11 @@ matches, and the Replace disclosure reveals a `Replace` button (one at a time) a
 ## Syntax highlighting
 
 **HTML** (`.html`, `.htm`), **CSS** (`.css`), **JavaScript** (`.js`, `.mjs`, `.cjs`),
-**TypeScript** (`.ts`, `.mts`, `.cts`) and **Python** (`.py`, `.pyi`, `.pyw`) are
-coloured. Nothing else is, and nothing
-needs turning on: the language is detected from the file extension when the document
-opens.
+**TypeScript** (`.ts`, `.mts`, `.cts`), **Python** (`.py`, `.pyi`, `.pyw`) and
+**Shell** (`.sh`, `.bash`, `.zsh`, `.command`, and dotfiles such as `.zshrc` and
+`.bashrc`) are coloured. Nothing else is, and nothing needs turning on: the language
+is detected from the file name when the document opens — a known dotfile name first,
+then the extension.
 
 Inside an HTML page, `<style>` and `<script>` bodies are coloured as CSS and
 JavaScript. The HTML grammar hands those over as one opaque node, so each is
@@ -235,9 +237,11 @@ capture fails the suite instead of silently un-colouring something.
   | --- | --- |
   | JavaScript, library code | 0.07 ms/KB |
   | CSS, real stylesheets | 0.12 ms/KB |
+  | Shell, real bash scripts | 0.10–0.16 ms/KB |
   | Python, standard library | 0.14–0.20 ms/KB |
   | JavaScript, dense component code | 0.21 ms/KB |
   | HTML, tag-dense markup | 0.26 ms/KB |
+  | Shell, dense bash | 0.38 ms/KB |
   | Python, dense comprehensions | 0.49 ms/KB |
 
   A 64 KB file of the densest markup is about 17 ms here. The cap is sized so that
@@ -264,6 +268,10 @@ capture fails the suite instead of silently un-colouring something.
   their substring each time, because that substring moves and changes wholesale with
   every edit around it. A page whose bulk is one big inline script gains little from
   the incremental parse (measured 1.1× against 2× for everything else).
+- **A shell script with no extension is not detected.** Dotfiles are recognised by
+  name, but a script recognisable only by its `#!/bin/bash` line stays plain. zsh
+  files colour less completely than Bash, because the grammar is Bash and zsh-only
+  syntax parses as errors.
 - **Minified files are not highlighted**, on the signal the editor already has: if a
   file's longest line forced wrapping off, one layout fragment covers the whole
   document and the validator would be handed every token in it at once.
@@ -348,8 +356,13 @@ bug in how Close routes through the responder chain.
 Planned for the next version, in no particular order.
 
 - **More languages for syntax highlighting**, one at a time. HTML, CSS, JavaScript,
-  TypeScript and Python ship; php, shell and java remain. Each is an enum case, a vendored query directory and a package
-  dependency — see [Syntax highlighting](#syntax-highlighting).
+  TypeScript, Python and Shell ship; php, java and sql remain. Each is an enum case, a
+  vendored query directory and a package dependency — see
+  [Syntax highlighting](#syntax-highlighting). SQL is the odd one out: there is no
+  grammar under the tree-sitter organisation, so it would be the first dependency
+  from a community repository
+  ([DerekStride/tree-sitter-sql](https://github.com/DerekStride/tree-sitter-sql)),
+  and SQL dialects differ enough that which one it parses is worth checking first.
 - **Incremental highlighting query.** The parse is incremental now, but the
   highlights query still walks the whole tree on every keystroke, and on an
   ordinary file that is the remaining half of the cost. `ts_tree_get_changed_ranges`

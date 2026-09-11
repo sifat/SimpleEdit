@@ -126,6 +126,8 @@ struct IncrementalParseTests {
         // Python: indentation is syntax, so whitespace at a line start is a
         // real edit to structure, not noise.
         "    ", "\t", ":\n    ", "def g():", "f\"{x}\"", "lambda y: y", "@deco",
+        // Shell: heredoc openers and closers, substitutions, quoting.
+        "<<EOF\n", "\nEOF\n", "$(", "${", "<(", "2>&1", "; then", "\nfi", "-la", "|",
     ]
 
     /// tree-sitter points: row is the number of newlines before the offset,
@@ -307,6 +309,36 @@ struct IncrementalParseTests {
     @Test("Python survives random edits", arguments: [71, 72, 73, 74] as [UInt64])
     func python(seed: UInt64) throws {
         try runDifferential(.python, seed: seed, initial: Self.python, edits: 150)
+    }
+
+    private static let shell = """
+    #!/usr/bin/env bash
+    # Build every architecture.
+    set -euo pipefail
+    readonly ROOT="$(cd "$(dirname "$0")" && pwd)"
+
+    build() {
+      local arch=${1:-arm64}
+      swift build -c release --triple "$arch-apple-macosx" 2>&1 | tee "build-$arch.log"
+    }
+
+    for arch in arm64 x86_64; do
+      if [ -n "$arch" ]; then build "$arch"; fi
+    done
+
+    cat <<EOF > summary.txt
+    built in $ROOT
+    EOF
+    echo 'done'
+    """
+
+    /// The shell scanner carries heredoc state across lines -- a heredoc body
+    /// only ends where its delimiter reappears -- so an edit that opens or
+    /// closes one changes how everything after it lexes. That is the reuse
+    /// case most likely to go wrong.
+    @Test("Shell survives random edits", arguments: [81, 82, 83, 84] as [UInt64])
+    func shell(seed: UInt64) throws {
+        try runDifferential(.shell, seed: seed, initial: Self.shell, edits: 150)
     }
 
     @Test("CSS survives random edits", arguments: [31, 32, 33] as [UInt64])
