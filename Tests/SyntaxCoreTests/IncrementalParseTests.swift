@@ -123,6 +123,9 @@ struct IncrementalParseTests {
         "\n", "\r\n", " ", ";", "=", "<", ">", "/*", "*/", "//", "@media (", "--x", "#fff",
         "const x = 1;", "function f(a) { return a; }", ".a { color: red; }", "interface I { x: number }",
         "A_B_C", "abc", "1.5em", "!important", "var(--x)", "typeof",
+        // Python: indentation is syntax, so whitespace at a line start is a
+        // real edit to structure, not noise.
+        "    ", "\t", ":\n    ", "def g():", "f\"{x}\"", "lambda y: y", "@deco",
     ]
 
     /// tree-sitter points: row is the number of newlines before the offset,
@@ -273,6 +276,37 @@ struct IncrementalParseTests {
     @Test("TypeScript survives random edits", arguments: [21, 22, 23] as [UInt64])
     func typescript(seed: UInt64) throws {
         try runDifferential(.typescript, seed: seed, initial: Self.typescript, edits: 150)
+    }
+
+    private static let python = """
+    # Cart totals.
+    from dataclasses import dataclass
+    from typing import TypeVar
+
+    T = TypeVar("T")
+    TAX_RATE = 0.0825
+
+    @dataclass
+    class Cart:
+        items: list
+
+        def subtotal(self) -> float:
+            return sum(item.price * item.qty for item in self.items)
+
+        def apply(self, code: str) -> bool:
+            if not code.isupper() or len(code) < 4:
+                raise ValueError(f"bad coupon: {code}\\n")
+            self.coupon = code
+            return True
+    """
+
+    /// Python is the language where the incremental parse matters most for
+    /// correctness: indentation is resolved by the external scanner, which
+    /// carries state across tokens, so reuse has to survive a scanner whose
+    /// state an edit may have changed.
+    @Test("Python survives random edits", arguments: [71, 72, 73, 74] as [UInt64])
+    func python(seed: UInt64) throws {
+        try runDifferential(.python, seed: seed, initial: Self.python, edits: 150)
     }
 
     @Test("CSS survives random edits", arguments: [31, 32, 33] as [UInt64])

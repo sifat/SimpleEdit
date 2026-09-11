@@ -103,6 +103,18 @@ public enum SyntaxTokenKind: String, Sendable, CaseIterable {
             "embedded": nil,
             "type": .type,
         ],
+        // Python needs exactly TypeScript's table, for the same reasons in the
+        // same places: `(identifier) @variable` is the blanket capture,
+        // `@constructor` is the `^[A-Z]` naming guess, and `@type` is an
+        // annotation name. `@embedded` is an f-string interpolation -- always
+        // inside a `(string)`, which covers it whole -- and is unmapped for
+        // consistency rather than because it could ever be seen.
+        .python: [
+            "variable": nil,
+            "constructor": nil,
+            "embedded": nil,
+            "type": .type,
+        ],
     ]
 
     /// The union of every vendored query's capture names. Adding a language

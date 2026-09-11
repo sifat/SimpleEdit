@@ -3,13 +3,14 @@
 A small native macOS text editor. Swift + AppKit + `NSDocument`, built with SwiftPM,
 wrapped into a `.app` by a shell script. No Electron, no xcodeproj, no xib.
 
-Five third-party dependencies, all pinned to exact versions, all for syntax
+Six third-party dependencies, all pinned to exact versions, all for syntax
 highlighting, and **all of them C**:
 [`tree-sitter`](https://github.com/tree-sitter/tree-sitter) itself plus the
 [HTML](https://github.com/tree-sitter/tree-sitter-html),
 [CSS](https://github.com/tree-sitter/tree-sitter-css),
-[JavaScript](https://github.com/tree-sitter/tree-sitter-javascript) and
-[TypeScript](https://github.com/tree-sitter/tree-sitter-typescript) grammars. There is
+[JavaScript](https://github.com/tree-sitter/tree-sitter-javascript),
+[TypeScript](https://github.com/tree-sitter/tree-sitter-typescript) and
+[Python](https://github.com/tree-sitter/tree-sitter-python) grammars. There is
 no Swift binding in between — the query loop talks to the C API directly, because the
 binding allocated an object per capture and that was most of the cost of highlighting.
 Each grammar's highlight query is vendored into `Resources/Queries/` under its MIT
@@ -161,8 +162,9 @@ matches, and the Replace disclosure reveals a `Replace` button (one at a time) a
 
 ## Syntax highlighting
 
-**HTML** (`.html`, `.htm`), **CSS** (`.css`), **JavaScript** (`.js`, `.mjs`, `.cjs`)
-and **TypeScript** (`.ts`, `.mts`, `.cts`) are coloured. Nothing else is, and nothing
+**HTML** (`.html`, `.htm`), **CSS** (`.css`), **JavaScript** (`.js`, `.mjs`, `.cjs`),
+**TypeScript** (`.ts`, `.mts`, `.cts`) and **Python** (`.py`, `.pyi`, `.pyw`) are
+coloured. Nothing else is, and nothing
 needs turning on: the language is detected from the file extension when the document
 opens.
 
@@ -202,7 +204,7 @@ measurements behind it, are in [Escape hatches](#escape-hatches).
 | Mismatched closing tag | orange |
 
 Plain identifiers are **not** coloured, in any language — variables, parameters, and
-in JavaScript class names too. That is a deliberate consequence of how overlapping
+in JavaScript and Python class names too. That is a deliberate consequence of how overlapping
 captures are resolved, and `Resources/Queries/javascript/SOURCE.md` explains it: the
 grammar captures every identifier, and that capture collides with several others over
 the same range, so colouring it would make the winner a sort tie-break rather than a
@@ -233,12 +235,16 @@ capture fails the suite instead of silently un-colouring something.
   | --- | --- |
   | JavaScript, library code | 0.07 ms/KB |
   | CSS, real stylesheets | 0.12 ms/KB |
+  | Python, standard library | 0.14–0.20 ms/KB |
   | JavaScript, dense component code | 0.21 ms/KB |
   | HTML, tag-dense markup | 0.26 ms/KB |
+  | Python, dense comprehensions | 0.49 ms/KB |
 
   A 64 KB file of the densest markup is about 17 ms here. The cap is sized so that
   a typical file at the cap stays well inside the time budget below on slower
-  hardware.
+  hardware. Python is the awkward case: real Python is cheap and real Python files
+  are often large, but dense Python is the most expensive code measured in any
+  language, so it keeps the 64 KB cap and big standard-library modules stay plain.
 - **A hostile or half-typed file is left plain, not frozen on.** The size cap
   cannot bound the worst case, because the worst case is nesting depth and
   unbalanced brackets — quadratic, and reachable from an ordinary file mid-edit:
@@ -341,9 +347,8 @@ bug in how Close routes through the responder chain.
 
 Planned for the next version, in no particular order.
 
-- **More languages for syntax highlighting**, one at a time. HTML, CSS, JavaScript
-  and TypeScript ship; python, php, shell and java remain, in an order still to be
-  decided. Each is an enum case, a vendored query directory and a package
+- **More languages for syntax highlighting**, one at a time. HTML, CSS, JavaScript,
+  TypeScript and Python ship; php, shell and java remain. Each is an enum case, a vendored query directory and a package
   dependency — see [Syntax highlighting](#syntax-highlighting).
 - **Incremental highlighting query.** The parse is incremental now, but the
   highlights query still walks the whole tree on every keystroke, and on an
