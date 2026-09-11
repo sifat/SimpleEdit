@@ -348,8 +348,13 @@ bug in how Close routes through the responder chain.
 Planned for the next version, in no particular order.
 
 - **More languages for syntax highlighting**, one at a time. HTML, CSS, JavaScript,
-  TypeScript and Python ship; php, shell and java remain. Each is an enum case, a vendored query directory and a package
-  dependency — see [Syntax highlighting](#syntax-highlighting).
+  TypeScript and Python ship; php, shell, java and sql remain. Each is an enum case, a
+  vendored query directory and a package dependency — see
+  [Syntax highlighting](#syntax-highlighting). SQL is the odd one out: there is no
+  grammar under the tree-sitter organisation, so it would be the first dependency
+  from a community repository
+  ([DerekStride/tree-sitter-sql](https://github.com/DerekStride/tree-sitter-sql)),
+  and SQL dialects differ enough that which one it parses is worth checking first.
 - **Incremental highlighting query.** The parse is incremental now, but the
   highlights query still walks the whole tree on every keystroke, and on an
   ordinary file that is the remaining half of the cost. `ts_tree_get_changed_ranges`
