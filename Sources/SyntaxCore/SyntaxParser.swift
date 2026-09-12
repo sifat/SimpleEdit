@@ -368,10 +368,16 @@ public final class SyntaxParser {
                 tree = newTree
                 treeByteCount = byteCount
                 editsSinceParse = false
-                return tokens(in: newTree, document: buffer, text: text, ranges: nil, deadline: deadline)
+                return tokens(
+                    in: newTree, document: buffer, text: text, string: source,
+                    ranges: nil, deadline: deadline
+                )
             } else {
                 defer { ts_tree_delete(newTree) }
-                return tokens(in: newTree, document: buffer, text: text, ranges: nil, deadline: deadline)
+                return tokens(
+                    in: newTree, document: buffer, text: text, string: source,
+                    ranges: nil, deadline: deadline
+                )
             }
         }
     }
@@ -394,6 +400,7 @@ public final class SyntaxParser {
     private func childTokens(
         document: UnsafeBufferPointer<UInt16>,
         text: NSString,
+        string: String,
         ranges: [NSRange],
         deadline: UnsafeMutablePointer<Deadline>
     ) -> SyntaxTokenList? {
@@ -403,17 +410,24 @@ public final class SyntaxParser {
         guard let newTree = Self.parse(document, with: parser, oldTree: nil, deadline: deadline)
         else { return nil }
         defer { ts_tree_delete(newTree) }
-        return tokens(in: newTree, document: document, text: text, ranges: ranges, deadline: deadline)
+        return tokens(
+            in: newTree, document: document, text: text, string: string,
+            ranges: ranges, deadline: deadline
+        )
     }
 
+    /// `text` and `string` are the same characters twice: predicates compare
+    /// through the NSString and run regexes through the String, and bridging
+    /// between the two on every evaluation was measurable, so both travel.
     private func tokens(
         in tree: OpaquePointer,
         document: UnsafeBufferPointer<UInt16>,
         text: NSString,
+        string: String,
         ranges: [NSRange]?,
         deadline: UnsafeMutablePointer<Deadline>
     ) -> SyntaxTokenList? {
-        guard var tokens = captures(in: tree, text: text, deadline: deadline) else {
+        guard var tokens = captures(in: tree, text: text, string: string, deadline: deadline) else {
             return nil
         }
         // A node of the injected language can span one of the holes -- an
@@ -424,7 +438,8 @@ public final class SyntaxParser {
         // reports a node outside the ranges it was given.
         if let ranges { tokens = Self.clip(tokens, to: ranges) }
         tokens += injectedTokens(
-            in: tree, document: document, text: text, parentRanges: ranges, deadline: deadline
+            in: tree, document: document, text: text, string: string,
+            parentRanges: ranges, deadline: deadline
         )
         // A cut ANYWHERE is a cut of the whole call. A child that ran out of
         // time has returned nothing for its region, and nothing here can tell
@@ -461,6 +476,7 @@ public final class SyntaxParser {
     private func captures(
         in tree: OpaquePointer,
         text: NSString,
+        string: String,
         deadline: UnsafeMutablePointer<Deadline>
     ) -> [SyntaxToken]? {
         var tokens: [SyntaxToken] = []
@@ -482,7 +498,7 @@ public final class SyntaxParser {
                     start: match.captures,
                     count: Int(match.capture_count)
                 )
-                guard passes(match: match, captures: captures, text: text, tests: tests)
+                guard passes(match: match, captures: captures, text: text, string: string, tests: tests)
                 else { continue }
 
                 for capture in captures {
@@ -516,18 +532,31 @@ public final class SyntaxParser {
         /// are dropped rather than emitted unfiltered.
         case never
         case match(capture: UInt32, regex: NSRegularExpression, negated: Bool)
-        case equals(capture: UInt32, values: [NSString], negated: Bool)
-        case anyOf(capture: UInt32, values: [NSString], negated: Bool)
+        case equals(capture: UInt32, values: [Literal], negated: Bool)
+        case anyOf(capture: UInt32, values: [Literal], negated: Bool)
+    }
+
+    /// A string argument of a predicate, with its UTF-16 length worked out
+    /// once: a length mismatch rejects a capture before any characters are
+    /// compared, and that is the outcome for nearly every capture tested.
+    private struct Literal {
+        let string: String
+        let utf16Count: Int
+
+        init(_ string: String) {
+            self.string = string
+            self.utf16Count = string.utf16.count
+        }
     }
 
     /// Compares a range of the document against a value without copying it out.
     private static func text(
         _ text: NSString,
         _ range: NSRange,
-        equals value: NSString
+        equals value: Literal
     ) -> Bool {
-        range.length == value.length
-            && text.compare(value as String, options: [.literal], range: range) == .orderedSame
+        range.length == value.utf16Count
+            && text.compare(value.string, options: [.literal], range: range) == .orderedSame
     }
 
     /// Evaluated against the document rather than against an extracted
@@ -541,6 +570,7 @@ public final class SyntaxParser {
         match: TSQueryMatch,
         captures: UnsafeBufferPointer<TSQueryCapture>,
         text: NSString,
+        string: String,
         tests: [[CaptureTest]]
     ) -> Bool {
         let pattern = Int(match.pattern_index)
@@ -556,9 +586,13 @@ public final class SyntaxParser {
             case let .match(index, regex, negated):
                 for capture in captures where capture.index == index {
                     guard let range = Self.range(of: capture.node) else { return false }
-                    let matched = regex.firstMatch(
-                        in: text as String, options: [], range: range
-                    ) != nil
+                    // rangeOfFirstMatch, not firstMatch: the latter allocates
+                    // an NSTextCheckingResult per evaluation whose only use
+                    // here was to be compared with nil, and this runs on every
+                    // identifier in a JavaScript, Python or PHP file.
+                    let matched = regex.rangeOfFirstMatch(
+                        in: string, options: [], range: range
+                    ).location != NSNotFound
                     if matched == negated { return false }
                 }
 
@@ -669,6 +703,7 @@ public final class SyntaxParser {
         in tree: OpaquePointer,
         document: UnsafeBufferPointer<UInt16>,
         text: NSString,
+        string: String,
         parentRanges: [NSRange]?,
         deadline: UnsafeMutablePointer<Deadline>
     ) -> [SyntaxToken] {
@@ -702,6 +737,7 @@ public final class SyntaxParser {
                 match: match,
                 captures: captures,
                 text: text,
+                string: string,
                 tests: injections.tests
             ) else { continue }
 
@@ -741,7 +777,8 @@ public final class SyntaxParser {
                 // see the comment there for why a partial result is worse
                 // than none.
                 injected += Self.run(
-                    child, ranges: ranges, document: document, text: text, deadline: deadline
+                    child, ranges: ranges, document: document, text: text, string: string,
+                    deadline: deadline
                 )
             }
         }
@@ -753,7 +790,8 @@ public final class SyntaxParser {
             let ranges = Self.includedRanges(of: nodes, within: parentRanges)
             guard !ranges.isEmpty, let child = childParser(for: key.language) else { continue }
             injected += Self.run(
-                child, ranges: ranges, document: document, text: text, deadline: deadline
+                child, ranges: ranges, document: document, text: text, string: string,
+                deadline: deadline
             )
         }
         return injected
@@ -773,6 +811,7 @@ public final class SyntaxParser {
         ranges: [NSRange],
         document: UnsafeBufferPointer<UInt16>,
         text: NSString,
+        string: String,
         deadline: UnsafeMutablePointer<Deadline>
     ) -> [SyntaxToken] {
         if ranges.count == 1 {
@@ -792,7 +831,7 @@ public final class SyntaxParser {
             }
         }
         return child.childTokens(
-            document: document, text: text, ranges: ranges, deadline: deadline
+            document: document, text: text, string: string, ranges: ranges, deadline: deadline
         )?.tokens ?? []
     }
 
@@ -1183,9 +1222,9 @@ public final class SyntaxParser {
                 // Every remaining string argument, not just the first:
                 // `#any-of? @x "a" "b"` means both, and reading only "a" would
                 // quietly narrow the test.
-                let values: [NSString] = steps.dropFirst(2).compactMap { step in
+                let values: [Literal] = steps.dropFirst(2).compactMap { step in
                     guard step.type == TSQueryPredicateStepTypeString else { return nil }
-                    return stringValue(step.value_id, in: query).map { $0 as NSString }
+                    return stringValue(step.value_id, in: query).map(Literal.init)
                 }
                 let negated = name.hasPrefix("not-")
 
@@ -1198,7 +1237,7 @@ public final class SyntaxParser {
                     // of emitting them unfiltered -- the language keeps
                     // highlighting everything else.
                     guard let regex = try? NSRegularExpression(
-                        pattern: Self.icuPattern(from: pattern as String)
+                        pattern: Self.icuPattern(from: pattern.string)
                     )
                     else { return .never }
                     return .match(capture: capture, regex: regex, negated: negated)
