@@ -36,8 +36,8 @@ Two smaller traps, recorded because both cost time to find:
   `TreeSitterJavascript`, so a snippet copied from that tag will not compile.
 - Only `highlights.scm` is vendored. Upstream's `queries/` also ships
   `highlights-jsx.scm`, `highlights-params.scm`, `injections.scm`, `locals.scm`
-  and `tags.scm`. `LanguageConfiguration` looks for exactly one `highlights.scm`
-  per directory, and the app claims `.js`/`.mjs`/`.cjs` but **not** `.jsx`,
+  and `tags.scm`. `SyntaxLanguage.queryFiles` names exactly the files that are
+  loaded, and the app claims `.js`/`.mjs`/`.cjs` but **not** `.jsx`,
   which would need the JSX query.
 
 ## Captures this app does not colour

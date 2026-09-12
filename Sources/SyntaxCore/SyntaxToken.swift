@@ -2,8 +2,8 @@ import Foundation
 
 /// One coloured run. The range is in **UTF-16 code units**, which is what
 /// NSTextStorage, NSRange and TextKit 2 all speak -- and, conveniently, what
-/// SwiftTreeSitter reports, since it parses UTF-16LE end to end. No conversion
-/// happens anywhere in this pipeline, and none should be added.
+/// `SyntaxParser` reports, since tree-sitter is fed UTF-16LE end to end. No
+/// conversion happens anywhere in this pipeline, and none should be added.
 public struct SyntaxToken: Sendable, Equatable {
     public let range: NSRange
     public let kind: SyntaxTokenKind
@@ -35,10 +35,10 @@ public struct SyntaxTokenList: Sendable, Equatable {
     /// dropping anything that starts before the previous token ends gives
     /// "outermost wins", deterministically.
     ///
-    /// For HTML today this is very nearly a no-op -- its seven captures do not
-    /// nest in practice. It is written and tested now because the first
-    /// injected language (CSS or JavaScript inside HTML) makes it load-bearing,
-    /// and that is a bad moment to discover the rule was wrong.
+    /// For HTML alone this is very nearly a no-op -- its seven captures do not
+    /// nest in practice. It is load-bearing everywhere else: CSS and JavaScript
+    /// inside HTML, every grammar whose captures overlap on one identifier,
+    /// and three languages deep in a PHP template.
     public init(_ unsorted: [SyntaxToken]) {
         let sorted = unsorted.sorted { left, right in
             if left.range.location != right.range.location {

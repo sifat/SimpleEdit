@@ -47,15 +47,18 @@ let package = Package(
         // others give: Bash's 0.25 manifests list scanner.c unconditionally, so
         // that hazard does not arise. highlights.scm is byte-identical between
         // the two tags, so the only difference is the parser, and 0.25.1's is
-        // ABI 15 where every other grammar here is ABI 14. A new compatibility
-        // surface bought for no highlighting difference. Its manifest also asks
+        // ABI 15 where, when this was pinned, every other grammar here was
+        // ABI 14 -- PHP and SQL have since joined it, each for a parse-failure
+        // reason. Still a surface bought for no highlighting difference here.
+        // Its manifest also asks
         // for swift-tree-sitter `from: "0.25.0"`, the tag that is older than
         // 0.10.0; test-only and pruned, but not a thing to invite.
         .package(url: "https://github.com/tree-sitter/tree-sitter-bash", exact: "0.23.3"),
         // 0.23.5 is the newest tag there is. Java has no external scanner, so
         // the scanner hazard the other pins guard against cannot arise here.
         .package(url: "https://github.com/tree-sitter/tree-sitter-java", exact: "0.23.5"),
-        // 0.24.2, and the first ABI 15 grammar here -- an exception argued in
+        // 0.24.2, and the first of two ABI 15 grammars here (SQL is the other)
+        // -- an exception argued in
         // Resources/Queries/php/SOURCE.md rather than taken lightly. The short
         // of it: no ABI 14 tag parses an enum that declares a `const`, which
         // broke 6 of 6 such files in a real Drupal 10 tree, and upstream's

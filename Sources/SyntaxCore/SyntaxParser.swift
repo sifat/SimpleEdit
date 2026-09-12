@@ -327,6 +327,14 @@ public final class SyntaxParser {
         // and TextKit 2 all speak.
         let units = Array(source.utf16)
         let text = source as NSString
+        // tree-sitter's offsets are 32-bit. The app's size caps keep documents
+        // four orders of magnitude away from this, but SyntaxParser is public
+        // and imposes no cap of its own; past the limit the byte count below
+        // would trap in its UInt32 conversion.
+        guard units.count <= Int(UInt32.max) / 2 else {
+            invalidate()
+            return .empty
+        }
 
         return units.withUnsafeBufferPointer { buffer -> SyntaxTokenList? in
             let byteCount = buffer.count * 2
@@ -1013,7 +1021,8 @@ public final class SyntaxParser {
 
     // MARK: - Setting up
 
-    private static func grammar(for language: SyntaxLanguage) -> OpaquePointer? {
+    /// Internal so a test can pin each grammar's ABI version.
+    static func grammar(for language: SyntaxLanguage) -> OpaquePointer? {
         switch language {
         case .plain: nil
         case .html: tree_sitter_html()
@@ -1224,9 +1233,8 @@ public final class SyntaxParser {
                     // filter, so an unevaluable one drops its captures instead
                     // of emitting them unfiltered -- the language keeps
                     // highlighting everything else.
-                    guard let regex = try? NSRegularExpression(
-                        pattern: Self.icuPattern(from: pattern.string)
-                    )
+                    guard let translated = Self.icuPattern(from: pattern.string),
+                          let regex = try? NSRegularExpression(pattern: translated)
                     else { return .never }
                     return .match(capture: capture, regex: regex, negated: negated)
 
@@ -1272,7 +1280,15 @@ public final class SyntaxParser {
     /// `%` before a non-alphanumeric is its escape, which becomes ICU's
     /// backslash; before a class letter it becomes the class; and `%%` is a
     /// literal per cent.
-    private static func icuPattern(from pattern: String) -> String {
+    ///
+    /// Returns nil for a class letter it does not know (`%c`, `%g`), and the
+    /// caller then treats the test as unsatisfiable. Passing it through would
+    /// hand ICU a pattern that means "a literal per cent, then the letter" --
+    /// silently the wrong test, which is the exact failure this function
+    /// exists to prevent -- and dropping the captures is how an uncompilable
+    /// pattern is already handled. Internal rather than private so the table
+    /// of classes can be tested directly.
+    static func icuPattern(from pattern: String) -> String? {
         guard pattern.contains("%") else { return pattern }
         var out = ""
         let characters = Array(pattern)
@@ -1301,16 +1317,11 @@ public final class SyntaxParser {
             case "%": out += "%"
             default:
                 // Lua escapes a magic character with `%`; ICU with a
-                // backslash. A letter or digit we do not know is left as it
-                // was, so an unrecognised class cannot silently become
-                // something else.
-                if next.isLetter || next.isNumber {
-                    out.append(character)
-                    out.append(next)
-                } else {
-                    out.append("\\")
-                    out.append(next)
-                }
+                // backslash. A letter or digit is a class this table does
+                // not have, and there is no honest translation for it.
+                if next.isLetter || next.isNumber { return nil }
+                out.append("\\")
+                out.append(next)
             }
             index += 2
         }

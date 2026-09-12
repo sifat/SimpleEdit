@@ -21,9 +21,13 @@ Not the scanner hazard the other grammars cite. Bash's 0.25 manifests list
 
 - `highlights.scm` is **byte-identical** between v0.23.3 and v0.25.1, so the
   newer tag changes nothing that is coloured.
-- v0.25.1's parser is **ABI 15**. Every other grammar in the app is ABI 14.
-  tree-sitter 0.25.10 supports both, but it would be a new compatibility surface
-  bought for no highlighting difference.
+- v0.25.1's parser is **ABI 15**. When this was pinned every grammar in the app
+  was ABI 14, and tree-sitter 0.25.10 supports both, so it would have been a new
+  compatibility surface bought for no highlighting difference. That surface has
+  since been opened anyway -- PHP and SQL are ABI 15, each for a parse-failure
+  reason of its own -- so what remains of the argument is the byte-identical
+  query: nothing coloured would change. `GrammarABITests` pins every grammar's
+  version.
 - v0.25.1's manifest declares `swift-tree-sitter` `from: "0.25.0"` — the tag
   that is chronologically older than 0.10.0. It is test-only and SwiftPM prunes
   it, but it is not a thing to invite into the graph.

@@ -17,7 +17,7 @@ struct SyntaxTokenListTests {
 
     /// A query cursor promises nothing about capture order, and grammars can
     /// capture nested nodes. The rule is outermost-wins, deterministically.
-    /// HTML barely exercises this; the first injected language will.
+    /// HTML alone barely exercises this; every injected language does.
     @Test("Overlapping tokens are resolved outermost-first")
     func dropsOverlaps() {
         let list = SyntaxTokenList([

@@ -170,6 +170,43 @@ struct PredicateTests {
 
     /// A query file that is missing or will not compile leaves the document
     /// plain rather than crashing.
+    /// SQL's query is written for Neovim, whose `#match?` takes a Lua pattern.
+    /// The translation is a table; this pins every row of it, the escape rule,
+    /// and that a class the table lacks refuses rather than passing through as
+    /// a literal per cent sign.
+    @Test("Lua character classes translate to ICU, and unknown ones refuse")
+    func luaPatternTranslation() {
+        #expect(SyntaxParser.icuPattern(from: "^[-+]?%d+$") == "^[-+]?[0-9]+$")
+        #expect(SyntaxParser.icuPattern(from: "%a%l%u%w%x") == "[A-Za-z][a-z][A-Z][A-Za-z0-9][0-9A-Fa-f]")
+        #expect(SyntaxParser.icuPattern(from: "%D%A%W") == "[^0-9][^A-Za-z][^A-Za-z0-9]")
+        #expect(SyntaxParser.icuPattern(from: "%s%S") == "[ \\t\\n\\r\\u{0B}\\u{0C}][^ \\t\\n\\r\\u{0B}\\u{0C}]")
+        #expect(SyntaxParser.icuPattern(from: "%p") == "[\\p{P}\\p{S}]")
+        #expect(SyntaxParser.icuPattern(from: "100%%") == "100%")
+        #expect(SyntaxParser.icuPattern(from: "a%.b%(c%)") == "a\\.b\\(c\\)")
+        // No per cent sign: untouched, whatever else it contains.
+        #expect(SyntaxParser.icuPattern(from: "^[A-Z]\\d+$") == "^[A-Z]\\d+$")
+        // A trailing per cent escapes nothing and is kept as it is.
+        #expect(SyntaxParser.icuPattern(from: "50%") == "50%")
+        // Classes the table does not have.
+        #expect(SyntaxParser.icuPattern(from: "%c") == nil)
+        #expect(SyntaxParser.icuPattern(from: "^%g+$") == nil)
+    }
+
+    @Test("An unknown Lua class drops its captures rather than passing them")
+    func unknownLuaClassFailsClosed() throws {
+        let found = try highlight(
+            "alpha; Beta; gamma;",
+            javascriptQuery: #"((identifier) @keyword (#match? @keyword "%c"))"#
+        )
+        #expect(found.isEmpty)
+        // ...while a known class is a working test.
+        let digits = try highlight(
+            "a1; bb; c22;",
+            javascriptQuery: #"((identifier) @keyword (#match? @keyword "%d$"))"#
+        )
+        #expect(digits.map(\.0) == ["a1", "c22"])
+    }
+
     @Test("A broken or missing query degrades to no parser")
     func brokenQuery() throws {
         let missing = try root([:])

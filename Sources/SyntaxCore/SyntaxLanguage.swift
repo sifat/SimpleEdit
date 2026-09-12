@@ -97,22 +97,9 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
     /// What the cap does bound is the *ordinary* cost paid on every keystroke,
     /// and it is sized so that a typical file at the cap finishes well inside
     /// the budget on hardware slower than this. Measured in release, which is
-    /// what the app ships (debug is 4-5x slower and was what an earlier
-    /// version of this table was measured in):
-    ///
-    ///     Java, JDK and Android sources  0.07-0.14 ms/KB
-    ///     JavaScript, library code       0.07 ms/KB
-    ///     CSS, real stylesheets          0.12 ms/KB
-    ///     Shell, real bash scripts       0.10-0.16 ms/KB
-    ///     Python, standard library       0.14-0.20 ms/KB
-    ///     JavaScript, dense component    0.21 ms/KB
-    ///     HTML, markup with inline js    0.21 ms/KB
-    ///     TypeScript, dense              0.22 ms/KB
-    ///     HTML, tag-dense markup         0.26 ms/KB
-    ///     Java, dense streams and lambdas 0.32 ms/KB
-    ///     Shell, zsh-specific syntax     0.37 ms/KB
-    ///     Shell, dense bash              0.38 ms/KB
-    ///     Python, dense comprehensions   0.49 ms/KB
+    /// what the app ships; the per-language rates live in ONE place, the
+    /// README's cost table under "What it does not do", so that there is one
+    /// table to keep true.
     ///
     /// Python is the awkward one. Real Python is cheap -- in CSS territory --
     /// and real Python files are often large: argparse.py is 100 KB, typing.py
@@ -146,9 +133,10 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         // PHP pays for two grammars, not one: the file is parsed as PHP, and
         // the HTML between its `?>` and `<?php` is parsed again as one combined
         // document. A 64 KB template of dense markup and dense PHP measures
-        // 29 ms a keystroke here -- the same bar dense Python (31 ms) already
-        // sets at this cap -- and real templates are far cheaper: WordPress's
-        // 62 KB media-template.php is 14 ms.
+        // 27 ms for a full parse here, 29 ms per keystroke with the
+        // incremental reuse (median) -- the same bar dense Python (31 ms)
+        // already sets at this cap -- and real templates are far cheaper:
+        // WordPress's 62 KB media-template.php is 12 ms (14 per keystroke).
         case .php: 64 * 1024
         // SQL is the one language whose cap is set by BROKEN files rather than
         // by dense ones, and it is half everything else's because of what a
@@ -204,7 +192,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
 
     /// The injections query, if this language embeds others.
     ///
-    /// Only HTML does. The file marks the body of a `<script>` or `<style>`
+    /// HTML and PHP do. HTML's file marks the body of a `<script>` or `<style>`
     /// element and tags it with a language NAME -- tree-sitter's name, not
     /// ours; upstream is explicit that these are not standardised, which is why
     /// `init?(injectionName:)` exists rather than a rawValue lookup.

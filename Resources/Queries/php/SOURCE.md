@@ -14,12 +14,12 @@ upstream files. Do not edit them.
 The reasoning for vendoring rather than reading the grammar's own resource
 bundle is in `../html/SOURCE.md`.
 
-## Why v0.24.2, and why it is the first ABI 15 grammar here
+## Why v0.24.2, and why it was the first ABI 15 grammar here
 
-Every other grammar in this app is ABI 14, and `../bash/SOURCE.md` argues
-against taking a 0.25 tag precisely to avoid a second compatibility surface.
-PHP is the exception, and the reason is a parse failure rather than a
-preference.
+When PHP was added every other grammar in this app was ABI 14 -- SQL, added
+later, is ABI 15 too -- and `../bash/SOURCE.md` argues against taking a 0.25
+tag precisely to avoid a second compatibility surface. PHP was the first
+exception, and the reason is a parse failure rather than a preference.
 
 **v0.23.12, the newest ABI 14 tag, cannot parse an enum that declares a
 constant** — ordinary PHP 8.1:
@@ -47,8 +47,9 @@ v0.23.12 leaves 4,146.
 
 Core tree-sitter is pinned at 0.25.10, which accepts ABI 13 through 15. If it
 were ever pinned below 0.25, `ts_parser_set_language` would refuse this grammar
-and `.php` files would quietly open plain; every other language would still
-work.
+and `.php` files would quietly open plain -- `.sql` files too, for the same
+reason; every other language would still work. `GrammarABITests` pins each
+grammar's version, so a change is a test failure rather than a discovery.
 
 Speed is identical between the two tags (~0.18 ms/KB on near-cap Drupal files),
 and the package adds about 1.06 MB to the arm64 binary unstripped. It builds two
