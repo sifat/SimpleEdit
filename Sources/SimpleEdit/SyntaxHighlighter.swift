@@ -182,13 +182,19 @@ final class SyntaxHighlighter: NSObject, NSTextStorageDelegate {
         // After a cut, most keystrokes do no work at all: the document stays
         // plain, and an attempt is made only when the backoff allows one.
         guard backoff.shouldAttempt() else { return }
-        let source = textView.string
-        guard (source as NSString).length <= language.maximumLength else {
+        // The cap is checked against the storage's length -- O(1), and the
+        // same UTF-16 count -- BEFORE the text is read. `textView.string`
+        // bridges and copies the whole document, and a file over the cap was
+        // paying that copy on every keystroke only to learn it was over the
+        // cap: the larger the file, the heavier typing got, for nothing.
+        guard let storage = textView.textStorage,
+              storage.length <= language.maximumLength
+        else {
             tokens = .empty
             parser.invalidate()
             return
         }
-        tokens = parser.tokens(for: source)
+        tokens = parser.tokens(for: textView.string)
         backoff.record(cut: parser.lastCallWasCut)
     }
 }

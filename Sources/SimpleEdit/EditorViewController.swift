@@ -141,26 +141,39 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
         // Assigning `string` directly does not post NSText.didChangeNotification
         // and registers no undo, so opening a file does not mark it edited.
         textView.string = text
+        documentTextDidArrive(text)
+    }
 
+    /// Everything that has to happen when the whole text changes at once rather
+    /// than through editing. One place, because assigning `string` posts no
+    /// notification, so each of these consumers has to be told by hand and it is
+    /// easy to add a third and forget one -- which is how Format JSON came to
+    /// skip the wrap decision: Minify produced the one enormous line that
+    /// `wrapDisableLineLength` exists for, with wrapping still on.
+    ///
+    /// `text` is the string the caller already holds. Scanning `textView.string`
+    /// instead bridged and copied the whole document a second time.
+    private func documentTextDidArrive(_ text: String) {
+        disableWrappingIfNeeded(for: text)
+        ruler.documentDidLoad()
+        installHighlighterIfNeeded()
+        highlighter?.documentTextDidArrive()
+    }
+
+    /// One-way on purpose: this turns wrapping off for a document with an
+    /// enormous line and never turns it back on. A user who chose to wrap a
+    /// long-lined file should not have that undone by Format JSON, and the menu
+    /// item is one keystroke away.
+    private func disableWrappingIfNeeded(for text: String) {
+        guard wrapsLines else { return }
         let longest = TextMetrics.longestLineLength(
-            in: textView.string,
+            in: text,
             stoppingAbove: Self.wrapDisableLineLength
         )
         if longest > Self.wrapDisableLineLength {
             wrapsLines = false
             applyWrapping()
         }
-        documentTextDidArrive()
-    }
-
-    /// Everything that has to happen when the whole text changes at once rather
-    /// than through editing. One place, because assigning `string` posts no
-    /// notification, so each of these consumers has to be told by hand and it is
-    /// easy to add a third and forget one.
-    private func documentTextDidArrive() {
-        ruler.documentDidLoad()
-        installHighlighterIfNeeded()
-        highlighter?.documentTextDidArrive()
     }
 
     /// Detection is by file name -- a known whole name such as `.zshrc` first,
@@ -194,8 +207,14 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
     /// document that was typed into and then undone back to its saved text
     /// could never return to clean -- Close always asked to save.
     func textDidChange(_ notification: Notification) {
+        // A wholesale replacement is about to run a fresh parse of its own;
+        // the incremental one this notification would start is pure waste.
+        guard !isReplacingEntireDocument else { return }
         highlighter?.textDidChange()
     }
+
+    /// Set while `replaceEntireDocument` swaps the text -- see there.
+    private var isReplacingEntireDocument = false
 
     /// Every insertion comes through here -- typing, paste, drag, Replace All
     /// -- and it is the one place that can keep the buffer LF-only. TextFileIO
@@ -300,9 +319,16 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
         storage.beginEditing()
         storage.replaceCharacters(in: whole, with: newText)
         storage.endEditing()
+        // didChangeText is required after editing the storage directly: it is
+        // what registers the change with undo and posts the notification. But
+        // the reparse that notification triggers is redundant with the fresh
+        // one documentTextDidArrive runs next, so it is suppressed. Before
+        // this, Format JSON parsed the whole document twice.
+        isReplacingEntireDocument = true
         textView.didChangeText()
+        isReplacingEntireDocument = false
 
-        documentTextDidArrive()
+        documentTextDidArrive(newText)
     }
 
     private func present(_ error: JSONToolError, in body: String, bomOffset: Int) {
