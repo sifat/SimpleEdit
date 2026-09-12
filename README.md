@@ -3,7 +3,7 @@
 A small native macOS text editor. Swift + AppKit + `NSDocument`, built with SwiftPM,
 wrapped into a `.app` by a shell script. No Electron, no xcodeproj, no xib.
 
-Nine third-party dependencies, all pinned to exact versions, all for syntax
+Ten third-party dependencies, all pinned, all for syntax
 highlighting, and **all of them C**:
 [`tree-sitter`](https://github.com/tree-sitter/tree-sitter) itself plus the
 [HTML](https://github.com/tree-sitter/tree-sitter-html),
@@ -12,8 +12,9 @@ highlighting, and **all of them C**:
 [TypeScript](https://github.com/tree-sitter/tree-sitter-typescript),
 [Python](https://github.com/tree-sitter/tree-sitter-python),
 [Bash](https://github.com/tree-sitter/tree-sitter-bash),
-[Java](https://github.com/tree-sitter/tree-sitter-java) and
-[PHP](https://github.com/tree-sitter/tree-sitter-php) grammars. There is
+[Java](https://github.com/tree-sitter/tree-sitter-java),
+[PHP](https://github.com/tree-sitter/tree-sitter-php) and
+[SQL](https://github.com/DerekStride/tree-sitter-sql) grammars. There is
 no Swift binding in between — the query loop talks to the C API directly, because the
 binding allocated an object per capture and that was most of the cost of highlighting.
 Each grammar's highlight query is vendored into `Resources/Queries/` under its MIT
@@ -168,8 +169,8 @@ matches, and the Replace disclosure reveals a `Replace` button (one at a time) a
 **HTML** (`.html`, `.htm`), **CSS** (`.css`), **JavaScript** (`.js`, `.mjs`, `.cjs`),
 **TypeScript** (`.ts`, `.mts`, `.cts`), **Python** (`.py`, `.pyi`, `.pyw`),
 **Shell** (`.sh`, `.bash`, `.zsh`, `.command`, and dotfiles such as `.zshrc` and
-`.bashrc`), **Java** (`.java`) and **PHP** (`.php`, `.phtml`) are coloured. Nothing
-else is, and nothing needs turning on: the language
+`.bashrc`), **Java** (`.java`), **PHP** (`.php`, `.phtml`) and **SQL** (`.sql`) are
+coloured. Nothing else is, and nothing needs turning on: the language
 is detected from the file name when the document opens — a known dotfile name first,
 then the extension.
 
@@ -262,7 +263,9 @@ capture fails the suite instead of silently un-colouring something.
   | HTML, tag-dense markup | 0.26 ms/KB |
   | Java, dense streams and lambdas | 0.32 ms/KB |
   | Shell, dense bash | 0.38 ms/KB |
+  | SQL, hand-written, dense | 0.22 ms/KB |
   | PHP, dense template, markup and code both | 0.42 ms/KB |
+  | SQL, a mysqldump file near its cap | 0.25–0.81 ms/KB |
   | Python, dense comprehensions | 0.49 ms/KB |
 
   A 64 KB file of the densest markup is about 17 ms here. The cap is sized so that
@@ -275,6 +278,12 @@ capture fails the suite instead of silently un-colouring something.
   keystroke, its own and the HTML around it, and a 64 KB template of dense markup
   and dense code costs about 27 ms — just under dense Python, which set this bar.
   Real templates are far cheaper: WordPress's 62 KB `media-template.php` is 12 ms.
+  **SQL caps at 32 KB**, half of everything else, and it is the one language whose
+  cap is set by broken files rather than dense ones. Dense hand-written SQL is
+  cheap — 64 KB of it is 14 ms — but the `.sql` files that exist on disk are
+  database dumps, which this grammar cannot parse, and error recovery over a
+  single enormous `INSERT` costs superlinearly: on a real dump, 7.8 ms at 32 KB,
+  16 ms at 48 KB, 52 ms at 64 KB.
 - **A hostile or half-typed file is left plain, not frozen on.** The size cap
   cannot bound the worst case, because the worst case is nesting depth and
   unbalanced brackets — quadratic, and reachable from an ordinary file mid-edit:
@@ -307,6 +316,20 @@ capture fails the suite instead of silently un-colouring something.
   newest grammar that predates the change, which cannot parse an enum containing a
   `const` at all — 6 of 6 such files in a real Drupal tree, up to a quarter of a
   file uncoloured. `Resources/Queries/php/SOURCE.md` has the measurements.
+- **A mysqldump or phpMyAdmin export is barely highlighted.** The only SQL
+  grammar available leans ANSI and PostgreSQL. Hand-written SQL parses cleanly,
+  but MySQL's versioned comments (`/*!40101 SET … */`), `START TRANSACTION`,
+  `COLLATE` in a column definition, `ENGINE=InnoDB` table options and
+  `LOCK TABLES` do not: of 25 real dumps tested, 24 contained parse errors, and
+  one 268 KB phpMyAdmin export parsed as a single error node end to end. Most
+  dumps are far past the size cap and stay plain anyway. There is no MySQL
+  grammar to switch to — the alternatives target PostgreSQL and SQLite — and the
+  measurements are in `Resources/Queries/sql/SOURCE.md`.
+- **SQL is most of the app's size.** Its parse tables are 11.2 MB per
+  architecture against 1.5 MB for the next largest grammar, because one grammar
+  covers several dialects at once. The universal binary went from about 12 MB to
+  34 MB when it was added. That is the cost of the language, and it was taken
+  knowingly.
 - **A shell script with no extension is not detected.** Dotfiles are recognised by
   name, but a script recognisable only by its `#!/bin/bash` line stays plain. zsh
   files colour less completely than Bash, because the grammar is Bash and zsh-only
@@ -394,14 +417,10 @@ bug in how Close routes through the responder chain.
 
 Planned for the next version, in no particular order.
 
-- **More languages for syntax highlighting**, one at a time. HTML, CSS, JavaScript,
-  TypeScript, Python, Shell, Java and PHP ship; sql remains. Each is an enum case, a
+- **The language list is done for now.** HTML, CSS, JavaScript, TypeScript,
+  Python, Shell, Java, PHP and SQL all ship. Another would be an enum case, a
   vendored query directory and a package dependency — see
-  [Syntax highlighting](#syntax-highlighting). SQL is the odd one out: there is no
-  grammar under the tree-sitter organisation, so it would be the first dependency
-  from a community repository
-  ([DerekStride/tree-sitter-sql](https://github.com/DerekStride/tree-sitter-sql)),
-  and SQL dialects differ enough that which one it parses is worth checking first.
+  [Syntax highlighting](#syntax-highlighting).
 - **Incremental highlighting query.** The parse is incremental now, but the
   highlights query still walks the whole tree on every keystroke, and on an
   ordinary file that is the remaining half of the cost. `ts_tree_get_changed_ranges`

@@ -7,6 +7,7 @@ import TreeSitterJava
 import TreeSitterJavaScript
 import TreeSitterPHP
 import TreeSitterPython
+import TreeSitterSql
 import TreeSitterTypeScript
 
 /// Turns source text into tokens. One per document.
@@ -959,6 +960,7 @@ public final class SyntaxParser {
         case .shell: tree_sitter_bash()
         case .java: tree_sitter_java()
         case .php: tree_sitter_php()
+        case .sql: tree_sitter_sql()
         }
     }
 
@@ -1158,7 +1160,9 @@ public final class SyntaxParser {
                     // filter, so an unevaluable one drops its captures instead
                     // of emitting them unfiltered -- the language keeps
                     // highlighting everything else.
-                    guard let regex = try? NSRegularExpression(pattern: pattern as String)
+                    guard let regex = try? NSRegularExpression(
+                        pattern: Self.icuPattern(from: pattern as String)
+                    )
                     else { return .never }
                     return .match(capture: capture, regex: regex, negated: negated)
 
@@ -1179,6 +1183,74 @@ public final class SyntaxParser {
                 }
             }
         }
+    }
+
+    /// A `#match?` pattern in ICU's dialect, translating Lua's character
+    /// classes on the way if it has any.
+    ///
+    /// `#match?` has no single dialect. tree-sitter's own tooling uses Rust
+    /// regex, this app uses ICU through NSRegularExpression, and **Neovim uses
+    /// Lua patterns**, where a character class is written `%d` rather than
+    /// `\d`. Every query vendored here came from a grammar that publishes for
+    /// tree-sitter's tooling -- except SQL's, which is written for Neovim, and
+    /// whose two predicates are `^[-+]?%d+$` and `^[-+]?%d*%.%d*$`.
+    ///
+    /// Left untranslated those are valid ICU patterns that mean something else
+    /// entirely: `%d` matches a literal `%` followed by `d`, so neither ever
+    /// matches a number. That is not a missing colour but a WRONG one --
+    /// `(literal)` is captured as `@string` too, so every number in a SQL file
+    /// would be dropped from `@number` and left red as a string.
+    ///
+    /// The translation is deliberately narrow. It does nothing at all unless
+    /// the pattern contains a `%`, and no `#match?` pattern in any other
+    /// vendored query does (the `"%"` in JavaScript's and Python's queries is
+    /// the modulo OPERATOR, a pattern literal, which never reaches here). Lua's
+    /// `%` before a non-alphanumeric is its escape, which becomes ICU's
+    /// backslash; before a class letter it becomes the class; and `%%` is a
+    /// literal per cent.
+    private static func icuPattern(from pattern: String) -> String {
+        guard pattern.contains("%") else { return pattern }
+        var out = ""
+        let characters = Array(pattern)
+        var index = 0
+        while index < characters.count {
+            let character = characters[index]
+            guard character == "%", index + 1 < characters.count else {
+                out.append(character)
+                index += 1
+                continue
+            }
+            let next = characters[index + 1]
+            switch next {
+            case "d": out += "[0-9]"
+            case "D": out += "[^0-9]"
+            case "a": out += "[A-Za-z]"
+            case "A": out += "[^A-Za-z]"
+            case "l": out += "[a-z]"
+            case "u": out += "[A-Z]"
+            case "w": out += "[A-Za-z0-9]"
+            case "W": out += "[^A-Za-z0-9]"
+            case "x": out += "[0-9A-Fa-f]"
+            case "s": out += "[ \\t\\n\\r\\u{0B}\\u{0C}]"
+            case "S": out += "[^ \\t\\n\\r\\u{0B}\\u{0C}]"
+            case "p": out += "[\\p{P}\\p{S}]"
+            case "%": out += "%"
+            default:
+                // Lua escapes a magic character with `%`; ICU with a
+                // backslash. A letter or digit we do not know is left as it
+                // was, so an unrecognised class cannot silently become
+                // something else.
+                if next.isLetter || next.isNumber {
+                    out.append(character)
+                    out.append(next)
+                } else {
+                    out.append("\\")
+                    out.append(next)
+                }
+            }
+            index += 2
+        }
+        return out
     }
 
     /// `#set!` directives for a pattern, as key/value pairs.

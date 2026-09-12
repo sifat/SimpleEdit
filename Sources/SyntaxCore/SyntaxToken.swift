@@ -52,20 +52,26 @@ public struct SyntaxTokenList: Sendable, Equatable {
             // Swift's sort is not stable, so the winner was whichever an
             // unstable sort happened to leave first.
             //
-            // The rule is that weaker evidence loses. Two kinds are weak:
+            // The rule is that weaker evidence loses. Three kinds are weak:
             //
             // - `.punctuation`, because a token that is punctuation AND
             //   something else is that something else. CSS's `*` is captured
             //   as both an operator and a universal selector; it is a selector,
             //   and colours as one.
-            // - `.constant`, because the only way a constant ties with another
-            //   kind is through a naming-convention guess -- `^[A-Z][A-Z_]*$`
-            //   on an identifier -- while `.type`, `.function` and `.property`
-            //   come from the identifier's syntactic position. Literal
-            //   constants (numbers, `true`, the doctype) never share a range
-            //   with anything. The cases that forced it: Python's single-letter
-            //   type variable, `T` in `def f(x: T) -> T`, and JavaScript's
-            //   `const MIN_SIZE = () => 1`, which is a function.
+            // - `.string`, because the one grammar that ties a string with
+            //   anything uses it as a FALLBACK. SQL captures every `(literal)`
+            //   as `@string` and then narrows the numeric ones with a
+            //   predicate-gated `@number` over the identical range; the gated
+            //   capture is the narrower claim and the better evidence, so
+            //   `SELECT 42` colours 42 as a number rather than as a string.
+            //   No other vendored query produces a string tie at all.
+            // - `.constant`, because the only way a constant ties with a kind
+            //   ABOVE it is through a naming-convention guess --
+            //   `^[A-Z][A-Z_]*$` on an identifier -- while `.type`,
+            //   `.function` and `.property` come from the identifier's
+            //   syntactic position. The cases that forced it: Python's
+            //   single-letter type variable, `T` in `def f(x: T) -> T`, and
+            //   JavaScript's `const MIN_SIZE = () => 1`, which is a function.
             //
             // Measured against the previous behaviour over every token in fifty
             // real stylesheets and the JS, TS and HTML fixtures: the only output
@@ -133,8 +139,9 @@ extension SyntaxTokenKind {
     fileprivate var tieRank: Int {
         switch self {
         case .punctuation: 0
-        case .constant: 1
-        default: 2
+        case .string: 1
+        case .constant: 2
+        default: 3
         }
     }
 }
