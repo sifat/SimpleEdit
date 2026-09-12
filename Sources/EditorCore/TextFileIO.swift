@@ -134,7 +134,11 @@ public enum TextFileIO {
     /// CRLF document and `replacingOccurrences(of: "\n", ...)` will not match the
     /// LF half of one. Doing this at Character level looks right and silently
     /// leaves carriage returns in the user's file.
-    static func normaliseToLF(_ text: String) -> String {
+    ///
+    /// Public because the editor applies it to every insertion as well: the
+    /// in-memory invariant "LF only" has to hold for pasted text too, or the
+    /// re-expansion on write hands back a mixed-ending file.
+    public static func normaliseToLF(_ text: String) -> String {
         // Test before allocating. text.utf8 is a lazy view, so this scans without
         // materialising anything; building the array first cost a full copy of
         // every LF document -- which is most of them, on every open and, once

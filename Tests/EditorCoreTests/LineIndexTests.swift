@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 @testable import EditorCore
 
@@ -95,6 +96,49 @@ struct LineIndexTests {
     @Test("A document exactly at the cap is still indexed")
     func atCap() {
         #expect(LineIndex("abc", maximumLength: 3)?.lineStarts == [0])
+    }
+
+    /// TextKit 2 makes one layout fragment per PARAGRAPH, and the gutter numbers
+    /// fragments, so the breaks counted here have to be Foundation's paragraph
+    /// separators -- not just LF, which is all a file normalised on read ever
+    /// contains, and not the line separators, which break a line without
+    /// starting a fragment. Counting only LF was right until the first pasted
+    /// CR or U+2029, after which every number below it was off by one.
+    @Test("Every paragraph separator opens a line; line separators do not")
+    func paragraphSeparators() {
+        #expect(LineIndex("a\rb", maximumLength: cap)?.lineStarts == [0, 2])
+        #expect(LineIndex("a\r\nb", maximumLength: cap)?.lineStarts == [0, 3])
+        #expect(LineIndex("a\u{2029}b", maximumLength: cap)?.lineStarts == [0, 2])
+        #expect(LineIndex("a\u{2028}b", maximumLength: cap)?.lineStarts == [0])
+        #expect(LineIndex("a\u{0085}b", maximumLength: cap)?.lineStarts == [0])
+        // CR CR LF is a lone CR then a CRLF pair: two breaks, not three.
+        #expect(LineIndex("a\r\r\nb", maximumLength: cap)?.lineStarts == [0, 2, 4])
+        #expect(LineIndex("\r\n", maximumLength: cap)?.lineStarts == [0, 2])
+    }
+
+    /// The authority. Whatever Foundation calls a paragraph is what TextKit
+    /// lays out as one fragment, so the index must agree with it exactly --
+    /// including on which characters are NOT paragraph separators.
+    @Test("Line starts agree with Foundation's paragraph starts")
+    func agreesWithFoundation() throws {
+        let text = "a\nb\rc\r\nd\u{2029}e\u{0085}f\u{2028}g\n\nh"
+        let index = try #require(LineIndex(text, maximumLength: cap))
+        let ns = text as NSString
+        var starts = [0]
+        var location = 0
+        while location < ns.length {
+            var end = 0
+            var contentsEnd = 0
+            ns.getParagraphStart(
+                nil, end: &end, contentsEnd: &contentsEnd,
+                for: NSRange(location: location, length: 0)
+            )
+            // A terminated paragraph opens the next line, even an empty trailing
+            // one; the final unterminated paragraph opens nothing.
+            if contentsEnd < end { starts.append(end) }
+            location = end
+        }
+        #expect(index.lineStarts == starts)
     }
 }
 

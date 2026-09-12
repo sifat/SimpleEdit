@@ -129,6 +129,11 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
     func reloadDocumentText() {
         guard let document else { return }
         didLoadDocumentText = true
+        // The undo stack is not cleared here because NSDocument's revert has
+        // already done it: its default implementation "still invokes
+        // updateChangeCount:NSChangeCleared and [[self undoManager]
+        // removeAllActions]" (NSDocument.h), and TextDocument.revert calls
+        // super before this.
         applyDocumentText(document.text)
     }
 
@@ -181,9 +186,40 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
 
     // MARK: - NSTextViewDelegate
 
+    /// Deliberately does NOT touch the change count. The text view edits
+    /// through the document's own undo manager (see `undoManager(for:)`), and
+    /// NSDocument observes that manager itself: +1 when an undo group closes,
+    /// -1 on undo, +1 on redo. An explicit `updateChangeCount(.changeDone)`
+    /// here counted every keystroke twice and every undo as net zero, so a
+    /// document that was typed into and then undone back to its saved text
+    /// could never return to clean -- Close always asked to save.
     func textDidChange(_ notification: Notification) {
-        document?.updateChangeCount(.changeDone)
         highlighter?.textDidChange()
+    }
+
+    /// Every insertion comes through here -- typing, paste, drag, Replace All
+    /// -- and it is the one place that can keep the buffer LF-only. TextFileIO
+    /// normalises line endings on read and re-expands them on write; without
+    /// this, pasting a CRLF clipboard into an LF document puts carriage
+    /// returns into the buffer, and `expand` writes them straight through: the
+    /// mixed-ending file that the LineEnding type exists to prevent, arriving
+    /// through the other door. The test is byte-level on purpose -- "\r\n" is
+    /// a single Character, so `contains("\r")` is false for it.
+    func textView(
+        _ textView: NSTextView,
+        shouldChangeTextIn affectedCharRange: NSRange,
+        replacementString: String?
+    ) -> Bool {
+        guard let replacement = replacementString,
+              replacement.utf8.contains(0x0D)
+        else { return true }
+        // insertText registers undo and comes back through this hook with a
+        // string that no longer trips it; the original insertion is dropped.
+        textView.insertText(
+            TextFileIO.normaliseToLF(replacement),
+            replacementRange: affectedCharRange
+        )
+        return false
     }
 
     /// Nothing wires a text view to its document's undo manager: NSWindowController
