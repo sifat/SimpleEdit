@@ -282,6 +282,60 @@ struct IncrementalParseTests {
         try runDifferential(.typescript, seed: seed, initial: Self.typescript, edits: 150)
     }
 
+    /// A PHP template, which is the hardest shape in the app: PHP with a
+    /// retained tree, the HTML around it re-parsed on every keystroke through
+    /// included ranges as ONE combined document, and that HTML's own
+    /// `<script>` and `<style>` injected a level deeper again. Elements
+    /// deliberately open in one fragment and close in another, so a walk that
+    /// breaks a `<?php` tag rearranges which text is HTML at all.
+    private static let php = """
+    <?php
+    declare(strict_types=1);
+    namespace Shop\\View;
+
+    use Shop\\Models\\Cart;
+
+    const TAX_RATE = 0.0825;
+
+    function money(float $amount): string {
+        // Two decimal places, always.
+        return number_format($amount, 2);
+    }
+
+    $cart = new Cart($items);
+    $total = $cart->subtotal() * (1 + TAX_RATE);
+    ?>
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <title><?= htmlspecialchars($title) ?></title>
+      <style>
+        .row { color: #ff0088; padding: 0 1.5rem; }
+      </style>
+    </head>
+    <body class="page">
+      <?php if ($cart->isEmpty()) { ?>
+        <p class="empty">Nothing here.</p>
+      <?php } else { ?>
+        <ul id="items" data-total="<?= money($total) ?>">
+          <?php foreach ($cart->items as $item) { ?>
+            <li class="<?= $item->cls ?>"><?= money($item->price) ?></li>
+          <?php } ?>
+        </ul>
+      <?php } ?>
+      <script>
+        const TAX = 0.0825;
+        function render(n) { return `${n * (1 + TAX)}`; }
+      </script>
+    </body>
+    </html>
+    """
+
+    @Test("PHP templates survive random edits", arguments: [41, 42, 43] as [UInt64])
+    func php(seed: UInt64) throws {
+        try runDifferential(.php, seed: seed, initial: Self.php, edits: 150)
+    }
+
     private static let python = """
     # Cart totals.
     from dataclasses import dataclass

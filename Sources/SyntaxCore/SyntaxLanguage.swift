@@ -14,6 +14,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
     case python
     case shell
     case java
+    case php
 
     public var title: String {
         switch self {
@@ -25,6 +26,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         case .python: "Python"
         case .shell: "Shell"
         case .java: "Java"
+        case .php: "PHP"
         }
     }
 
@@ -41,6 +43,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         case .python: 5
         case .shell: 6
         case .java: 7
+        case .php: 8
         }
     }
 
@@ -69,6 +72,10 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         // stay plain -- and `.command` is macOS's double-clickable script.
         case .shell: ["sh", "bash", "zsh", "command"]
         case .java: ["java"]
+        // `.phtml` is the other conventional extension for a PHP template.
+        // Drupal's `.module`, `.inc`, `.install` and `.theme` are PHP too, but
+        // `.inc` in particular is not PHP anywhere else, so they are left out.
+        case .php: ["php", "phtml"]
         }
     }
 
@@ -170,6 +177,13 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         case .plain: 0
         case .css: 128 * 1024
         case .html, .javascript, .typescript, .python, .shell, .java: 64 * 1024
+        // PHP pays for two grammars, not one: the file is parsed as PHP, and
+        // the HTML between its `?>` and `<?php` is parsed again as one combined
+        // document. A 64 KB template of dense markup and dense PHP measures
+        // 29 ms a keystroke here -- the same bar dense Python (31 ms) already
+        // sets at this cap -- and real templates are far cheaper: WordPress's
+        // 62 KB media-template.php is 14 ms.
+        case .php: 64 * 1024
         }
     }
 
@@ -212,6 +226,13 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
     public var injectionQueryFile: String? {
         switch self {
         case .html: "html/injections.scm"
+        // PHP's is `injections-text.scm`, which upstream ships separately from
+        // `injections.scm` precisely because it is the one a template editor
+        // wants: it marks every `(text)` node -- the HTML around the PHP -- as
+        // one COMBINED injection. `injections.scm` is deliberately not
+        // vendored; it injects phpdoc into comments and names a heredoc's
+        // language after its terminator, and this app has neither grammar.
+        case .php: "php/injections-text.scm"
         default: nil
         }
     }
@@ -226,6 +247,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         switch injectionName {
         case "javascript": self = .javascript
         case "css": self = .css
+        case "html": self = .html
         default: return nil
         }
     }
@@ -243,6 +265,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         case .python: "python"
         case .shell: "bash"
         case .java: "java"
+        case .php: "php"
         }
     }
 }

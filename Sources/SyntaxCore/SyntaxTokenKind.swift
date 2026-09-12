@@ -151,6 +151,39 @@ public enum SyntaxTokenKind: String, Sendable, CaseIterable {
             "function.method": .function,
             "type": .type,
         ],
+        // PHP's table is Java's plus three names Java's query never emits, and
+        // one that means something different here.
+        //
+        // - `variable` is NOT the blanket identifier capture it is everywhere
+        //   else: PHP variables carry a `$`, so the grammar captures exactly
+        //   `$foo` and nothing else. Measured over 45,000 WordPress and Drupal
+        //   files, it collides with only one other capture -- `property`, over
+        //   the identical range, on `$obj->$name` -- and both map to the same
+        //   kind, so the duplicate collapses instead of being decided by a
+        //   tie-break. Leaving it unmapped would instead leave every variable
+        //   in a PHP file uncoloured, which is most of the file.
+        // - `module` is a namespace name and `module.builtin` the `namespace`
+        //   of a relative name. A namespace reads as a type here; the keyword
+        //   reads as a keyword.
+        // - `constructor` is `__construct` and the class name in `new Foo`.
+        //   Both are type-ish, and `type` is what the same range usually
+        //   carries anyway, so agreeing with it avoids a tie-break.
+        //
+        // `type.builtin` is `static`, `self` and the primitive types; it has no
+        // row because the dotted walk reaches `type` and that is the right
+        // answer. It is gated by `#any-of?`, which this app evaluates -- were
+        // it not, 41,448 ordinary class names in the Drupal corpus would be
+        // captured as builtins.
+        .php: [
+            "variable": .property,
+            "variable.builtin": .keyword,
+            "function.builtin": .keyword,
+            "function.method": .function,
+            "type": .type,
+            "constructor": .type,
+            "module": .type,
+            "module.builtin": .keyword,
+        ],
     ]
 
     /// The union of every vendored query's capture names. Adding a language

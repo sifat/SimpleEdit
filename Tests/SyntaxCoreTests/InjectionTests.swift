@@ -136,12 +136,13 @@ struct InjectionTests {
         _ = try highlight("<script><script><script>")
     }
 
-    /// Only HTML injects. A stylesheet that happens to contain the text
+    /// Only HTML and PHP inject. A stylesheet that happens to contain the text
     /// `<script>` must not start sub-parsing.
-    @Test("Only HTML carries an injections query")
-    func onlyHTMLInjects() {
+    @Test("Only HTML and PHP carry an injections query")
+    func onlyHTMLAndPHPInject() {
         #expect(SyntaxLanguage.html.injectionQueryFile != nil)
-        for language in SyntaxLanguage.allCases where language != .html {
+        #expect(SyntaxLanguage.php.injectionQueryFile != nil)
+        for language in SyntaxLanguage.allCases where language != .html && language != .php {
             #expect(language.injectionQueryFile == nil)
         }
     }
@@ -150,6 +151,7 @@ struct InjectionTests {
     func injectionNames() {
         #expect(SyntaxLanguage(injectionName: "javascript") == .javascript)
         #expect(SyntaxLanguage(injectionName: "css") == .css)
+        #expect(SyntaxLanguage(injectionName: "html") == .html)
         // A name from a grammar we do not have leaves the region plain.
         #expect(SyntaxLanguage(injectionName: "python") == nil)
         #expect(SyntaxLanguage(injectionName: "JavaScript") == nil)
