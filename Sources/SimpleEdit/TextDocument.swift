@@ -85,7 +85,12 @@ final class TextDocument: NSDocument {
             let isAutosave = currentSaveOperation?.isAutosave ?? false
             editor.commitTextToDocument(breakingUndoCoalescing: !isAutosave)
         }
-        return TextFileIO.encode(storage.decoded)
+        // Encoding may change on the way out -- see TextFileIO.encode -- and
+        // what was written is what the document is from now on.
+        var decoded = storage.decoded
+        let data = TextFileIO.encode(&decoded)
+        storage.decoded = decoded
+        return data
     }
 
     /// NSDocument's revert replaces this document's storage but knows nothing

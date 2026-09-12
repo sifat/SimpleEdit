@@ -445,8 +445,12 @@ Nothing else is planned for the next release.
   large still pays a rescan per frame, which is what an incremental index would
   fix if it ever becomes worth doing.
 - **Encoding detection is a guess** when a file is not UTF-8, and there is no
-  encoding menu. Line endings (LF/CRLF/CR) and a UTF-8 BOM are detected on open and
-  restored on save.
+  encoding menu. A character the detected encoding cannot hold makes the file
+  UTF-8 on the next save, and it stays UTF-8 from then on; nothing tells you.
+  Line endings (LF/CRLF/CR) and a UTF-8 BOM are detected on open and restored on
+  save — but a file whose endings are **mixed** is rewritten wholesale to
+  whichever kind appears first, on lines you never touched, the first time it is
+  saved.
 - **Printing reflows for the paper.** Print builds a throwaway text view sized to
   the page rather than printing the one on screen, so the line-number gutter does
   not appear on paper and a document with wrapping turned off does not print as one

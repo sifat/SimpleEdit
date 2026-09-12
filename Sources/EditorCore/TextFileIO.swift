@@ -62,13 +62,30 @@ public enum TextFileIO {
         )
     }
 
-    public static func encode(_ decoded: DecodedText) -> Data {
+    /// The bytes to write, and -- through `decoded` -- the encoding they are
+    /// actually in.
+    ///
+    /// `inout` because the encoding can change here. A file opened as CP1252
+    /// that has since had an emoji typed into it cannot be written as CP1252;
+    /// it falls back to UTF-8 rather than refusing to save. That fallback used
+    /// to be silent: the file became UTF-8 on disk while the document still
+    /// said CP1252, so deleting the emoji and saving again flipped it back.
+    /// The document now learns what it has become, and stays it.
+    public static func encode(_ decoded: inout DecodedText) -> Data {
         let text = expand(decoded.text, to: decoded.lineEnding)
 
-        // Fall back to UTF-8 rather than refusing to save: the user may have typed
-        // characters the original encoding cannot represent.
-        let body = text.data(using: decoded.encoding) ?? Data(text.utf8)
-        return decoded.hasBOM ? utf8BOM + body : body
+        let body: Data
+        if let encoded = text.data(using: decoded.encoding) {
+            body = encoded
+        } else {
+            decoded.encoding = .utf8
+            body = Data(text.utf8)
+        }
+        // The BOM is UTF-8's; on any other encoding it would be three stray
+        // bytes. A file can decode with one and still not be UTF-8 -- a BOM
+        // followed by invalid UTF-8 is read as CP1252 -- so the flag alone is
+        // not enough to trust.
+        return decoded.hasBOM && decoded.encoding == .utf8 ? utf8BOM + body : body
     }
 
     // MARK: - Encoding detection
