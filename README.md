@@ -49,20 +49,28 @@ The download is a universal binary, so it runs on both Apple Silicon and Intel M
 
 ## Cutting a release
 
-```sh
-./build.sh --universal --zip     # -> build/SimpleEdit.zip
-```
+The flow every release has followed, written down because the version bump is
+the step that gets forgotten: v1.3's build number carried three new languages
+before anyone noticed.
 
-Then create the release and attach the zip — either through the web UI
-(repo ▸ Releases ▸ Draft a new release) or with the API:
+1. On `development`, bump `CFBundleShortVersionString` and `CFBundleVersion` in
+   `Resources/Info.plist` and write `docs/release-notes/vX.Y.md`.
+2. Merge `development` into `early-release`, then `early-release` into `master`
+   as `Release vX.Y`, and tag that merge: `git tag vX.Y`.
+3. On `master` at the tag:
 
-```sh
-gh release create v1.1 build/SimpleEdit.zip --title "SimpleEdit 1.1" --notes-file NOTES.md
-```
+   ```sh
+   ./build.sh --universal --zip     # -> build/SimpleEdit.zip
+   gh release create vX.Y build/SimpleEdit.zip --title "SimpleEdit X.Y" \
+       --notes-file docs/release-notes/vX.Y.md
+   ```
 
-Always use `--universal`; a default build is arm64-only and will not launch on an
-Intel Mac. Put the `xattr` instruction in the release notes, or the first thing
-anyone downloading it will hit is "damaged".
+`build.sh --zip` refuses unless `HEAD` carries a tag equal to the plist version,
+so step 1 cannot be skipped by accident; `ALLOW_UNTAGGED_ZIP=1` overrides it for
+a build that is shared but not released. Always use `--universal`; a default
+build is arm64-only and will not launch on an Intel Mac. Put the `xattr`
+instruction in the release notes, or the first thing anyone downloading it will
+hit is "damaged".
 
 ## Build and run
 
