@@ -35,8 +35,6 @@ final class TextDocument: NSDocument {
         set { storage.text = newValue }
     }
 
-    var lineEndingName: String { storage.decoded.lineEnding.displayName }
-
     // Autosave stays off. With it on, AppKit rewrites the user's real file as
     // they type -- including source files and dotfiles opened by accident -- and
     // suppresses the save-changes alert on close.

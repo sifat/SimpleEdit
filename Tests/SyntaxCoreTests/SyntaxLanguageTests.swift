@@ -27,13 +27,6 @@ struct SyntaxLanguageTests {
         #expect(SyntaxLanguage(fileExtension: "") == nil)
     }
 
-    @Test("Menu tags round-trip for every case")
-    func tagRoundTrip() {
-        for language in SyntaxLanguage.allCases {
-            #expect(SyntaxLanguage(tag: language.tag) == language)
-        }
-    }
-
     @Test("Only real languages have a queries directory")
     func queryDirectories() {
         #expect(SyntaxLanguage.plain.queryDirectoryName == nil)

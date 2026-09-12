@@ -17,44 +17,6 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
     case php
     case sql
 
-    public var title: String {
-        switch self {
-        case .plain: "None"
-        case .html: "HTML"
-        case .css: "CSS"
-        case .javascript: "JavaScript"
-        case .typescript: "TypeScript"
-        case .python: "Python"
-        case .shell: "Shell"
-        case .java: "Java"
-        case .php: "PHP"
-        case .sql: "SQL"
-        }
-    }
-
-    /// Menu tag. Only ever used to get from a clicked item back to a case; what
-    /// would be persisted is the raw string, so these carry no compatibility
-    /// weight.
-    public var tag: Int {
-        switch self {
-        case .plain: 0
-        case .html: 1
-        case .css: 2
-        case .javascript: 3
-        case .typescript: 4
-        case .python: 5
-        case .shell: 6
-        case .java: 7
-        case .php: 8
-        case .sql: 9
-        }
-    }
-
-    public init?(tag: Int) {
-        guard let match = Self.allCases.first(where: { $0.tag == tag }) else { return nil }
-        self = match
-    }
-
     /// Lowercased, without the dot.
     public var fileExtensions: [String] {
         switch self {

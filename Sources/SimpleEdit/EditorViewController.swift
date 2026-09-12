@@ -25,8 +25,11 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
 
     /// The text view and scroll view are built before either is in a window, so
     /// they need a non-degenerate starting size; autoresizing takes over after the
-    /// first layout pass.
-    private static let initialFrame = NSRect(x: 0, y: 0, width: 900, height: 640)
+    /// first layout pass. The window's default size, so the two never drift.
+    private static let initialFrame = NSRect(
+        origin: .zero,
+        size: EditorWindowController.defaultContentSize
+    )
 
     var document: TextDocument? {
         view.window?.windowController?.document as? TextDocument

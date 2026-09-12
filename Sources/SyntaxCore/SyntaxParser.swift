@@ -498,7 +498,7 @@ public final class SyntaxParser {
                     start: match.captures,
                     count: Int(match.capture_count)
                 )
-                guard passes(match: match, captures: captures, text: text, string: string, tests: tests)
+                guard Self.passes(match: match, captures: captures, text: text, string: string, tests: tests)
                 else { continue }
 
                 for capture in captures {
@@ -566,7 +566,7 @@ public final class SyntaxParser {
     /// fires on a large fraction of a file (`@constructor` is `^[A-Z]` on every
     /// identifier), so a substring per test would have given back much of what
     /// the C loop just won.
-    private func passes(
+    private static func passes(
         match: TSQueryMatch,
         captures: UnsafeBufferPointer<TSQueryCapture>,
         text: NSString,
@@ -733,7 +733,7 @@ public final class SyntaxParser {
             // Injection patterns can carry predicates like any others, and the
             // unsafe direction here is the permissive one: a region that should
             // not be injected would be parsed and coloured as another language.
-            guard passes(
+            guard Self.passes(
                 match: match,
                 captures: captures,
                 text: text,
@@ -937,24 +937,12 @@ public final class SyntaxParser {
         return result
     }
 
-    /// Cuts tokens back to `ranges` (sorted, disjoint). A token wholly inside
-    /// one range passes through untouched; one that spans a hole is split, so
-    /// that the host language's tokens inside that hole are not swallowed by
-    /// the outermost-wins merge.
+    /// Cuts tokens back to `ranges` (sorted, disjoint, and two or more of them:
+    /// `run` parses a single range as a substring and never comes here). A
+    /// token wholly inside one range passes through untouched; one that spans
+    /// a hole is split, so that the host language's tokens inside that hole
+    /// are not swallowed by the outermost-wins merge.
     private static func clip(_ tokens: [SyntaxToken], to ranges: [NSRange]) -> [SyntaxToken] {
-        guard ranges.count > 1 else {
-            guard let only = ranges.first else { return [] }
-            return tokens.compactMap { token in
-                let lower = max(token.range.location, only.location)
-                let upper = min(NSMaxRange(token.range), NSMaxRange(only))
-                guard upper > lower else { return nil }
-                if lower == token.range.location, upper == NSMaxRange(token.range) { return token }
-                return SyntaxToken(
-                    range: NSRange(location: lower, length: upper - lower),
-                    kind: token.kind
-                )
-            }
-        }
         var out: [SyntaxToken] = []
         out.reserveCapacity(tokens.count)
         for token in tokens {
