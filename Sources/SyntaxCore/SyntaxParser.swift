@@ -192,7 +192,11 @@ public final class SyntaxParser {
     func noteEdit(_ edit: TextEdit, start: TSPoint, oldEnd: TSPoint, newEnd: TSPoint) {
         guard isTopLevel, let tree else { return }
         guard edit.start >= 0, edit.start <= edit.oldEnd, edit.start <= edit.newEnd,
-              edit.oldEnd * 2 <= treeByteCount
+              edit.oldEnd * 2 <= treeByteCount,
+              // The only bound `newEnd` has is tree-sitter's 32-bit offsets;
+              // past it, the UInt32 conversion below would trap rather than
+              // start over, which is the wrong answer to a nonsense edit.
+              edit.newEnd <= Int(UInt32.max) / 2
         else {
             // An edit that cannot describe this text means the caller and the
             // tree have already disagreed; better to start over than to guess.
@@ -231,6 +235,7 @@ public final class SyntaxParser {
         tree = nil
         treeByteCount = 0
         editsSinceParse = false
+        lastCallWasCut = false
     }
 
     // MARK: - Tokenising
@@ -344,7 +349,13 @@ public final class SyntaxParser {
             else {
                 if deadline.pointee.exceeded {
                     // The edited old tree is kept: the edits it carries are
-                    // real, and the next keystroke can still reuse it.
+                    // real, and the next keystroke can still reuse it -- once
+                    // it has reported its edit. Reuse is re-earned, not
+                    // carried over: the guard above trusts this flag to mean
+                    // "every change since the tree was built was reported",
+                    // and a cut is a call, so a caller that reports nothing
+                    // before the next one may have changed anything.
+                    editsSinceParse = false
                     return nil
                 }
                 // An empty document has no tree and is not a failure.
@@ -415,6 +426,16 @@ public final class SyntaxParser {
         tokens += injectedTokens(
             in: tree, document: document, text: text, parentRanges: ranges, deadline: deadline
         )
+        // A cut ANYWHERE is a cut of the whole call. A child that ran out of
+        // time has returned nothing for its region, and nothing here can tell
+        // that from a region with nothing to colour -- so without this the
+        // outer tokens were reported as a success, `lastCallWasCut` stayed
+        // false, the backoff reset, and a hostile `<script>` burned the whole
+        // budget on every keystroke: the exact case CutBackoff exists for.
+        // Keeping the outer tokens would be no better. During the keystrokes
+        // the backoff skips they would be painted, stale, over text that has
+        // moved; plain is what the README promises for a cut document.
+        if deadline.pointee.exceeded { return nil }
         return SyntaxTokenList(tokens)
     }
 
@@ -617,6 +638,17 @@ public final class SyntaxParser {
         }
     }
 
+    /// One combined injection: every content node a pattern captured for one
+    /// language. Ordered so the work is done in a fixed order.
+    private struct CombinedKey: Hashable, Comparable {
+        let pattern: Int
+        let language: SyntaxLanguage
+
+        static func < (lhs: CombinedKey, rhs: CombinedKey) -> Bool {
+            (lhs.pattern, lhs.language.rawValue) < (rhs.pattern, rhs.language.rawValue)
+        }
+    }
+
     /// Tokens for the bodies of embedded languages -- `<script>` and `<style>`
     /// inside HTML, and the HTML around the PHP of a template -- expressed in
     /// the OUTER document's offsets.
@@ -645,9 +677,13 @@ public final class SyntaxParser {
         else { return [] }
 
         var injected: [SyntaxToken] = []
-        /// Content nodes of each combined pattern, gathered until the walk ends
-        /// because a combined injection is only whole once every match is in.
-        var combined: [Int: (language: SyntaxLanguage, nodes: [TSNode])] = [:]
+        /// Content nodes of each combined injection, gathered until the walk
+        /// ends because a combined injection is only whole once every match is
+        /// in. Keyed by pattern AND language: a pattern that names its language
+        /// through an `@injection.language` capture can name a different one
+        /// per match, and keying by pattern alone would parse every match as
+        /// whatever the first one said.
+        var combined: [CombinedKey: [TSNode]] = [:]
         let root = ts_tree_root_node(tree)
         // The injections query itself is a handful of matches and is run
         // without a callback; the deadline is enforced inside each child.
@@ -690,7 +726,8 @@ public final class SyntaxParser {
                 else { continue }
 
                 if isCombined {
-                    combined[pattern, default: (language, [])].nodes.append(capture.node)
+                    combined[CombinedKey(pattern: pattern, language: language), default: []]
+                        .append(capture.node)
                     continue
                 }
 
@@ -699,10 +736,10 @@ public final class SyntaxParser {
                       let child = childParser(for: language)
                 else { continue }
 
-                // A child that runs out of time leaves its region plain and
-                // the rest of the document coloured. Each parser's own result
-                // is all-or-nothing; the composite may be partial only at the
-                // granularity of a whole injected region.
+                // A child that runs out of time leaves the deadline marked
+                // exceeded, and `tokens(in:)` then discards the whole call --
+                // see the comment there for why a partial result is worse
+                // than none.
                 injected += Self.run(
                     child, ranges: ranges, document: document, text: text, deadline: deadline
                 )
@@ -711,10 +748,10 @@ public final class SyntaxParser {
 
         // Sorted, so the order of the work does not depend on the order the
         // query walk happened to report matches in.
-        for pattern in combined.keys.sorted() {
-            guard let entry = combined[pattern], !deadline.pointee.exceeded else { continue }
-            let ranges = Self.includedRanges(of: entry.nodes, within: parentRanges)
-            guard !ranges.isEmpty, let child = childParser(for: entry.language) else { continue }
+        for key in combined.keys.sorted() {
+            guard let nodes = combined[key], !deadline.pointee.exceeded else { continue }
+            let ranges = Self.includedRanges(of: nodes, within: parentRanges)
+            guard !ranges.isEmpty, let child = childParser(for: key.language) else { continue }
             injected += Self.run(
                 child, ranges: ranges, document: document, text: text, deadline: deadline
             )
