@@ -27,6 +27,12 @@ checked before pinning.
 The manifest there declares `swift-tree-sitter` for its test target only, and
 SwiftPM prunes it: resolving adds one pin, not two.
 
+## ABI
+
+The parser is **ABI 15**, like PHP's and unlike the other seven grammars, which
+are ABI 14. Core tree-sitter 0.25.10 accepts 13 through 15; `GrammarABITests`
+pins the number.
+
 ## Size
 
 `parser.c` is 41.6 MB of source and **11.2 MB of compiled parse tables per
@@ -78,6 +84,13 @@ So `SyntaxParser.icuPattern(from:)` translates Lua's character classes when a
 pattern contains `%`. No other vendored query's `#match?` pattern contains one,
 so nothing else is affected. The `.scm` itself stays a byte-for-byte copy,
 which is the rule this app does not break.
+
+One more step happens before that translation, inside tree-sitter: its query
+parser drops the backslash of an escape it does not know, so the `\.` in the
+second pattern arrives as a bare `.`, and what actually runs is
+`^[-+]?[0-9]*.[0-9]*$` -- any character where a dot was meant. Harmless here,
+because `@number` and `@float` both map to `constant` and no quoted literal
+matches the pattern, but it is not the pattern the file shows.
 
 ## Keeping it in step with upstream
 

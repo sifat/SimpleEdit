@@ -24,9 +24,13 @@ struct QueryLoadingTests {
         SyntaxLanguage.allCases.filter { !$0.queryFiles.isEmpty }
     }
 
+    /// The injections file too. It is the one whose loss is silent even at
+    /// runtime: the parser is fail-soft about it, so a missing `injections.scm`
+    /// means every `<script>` body quietly goes plain, with no error anywhere.
     @Test("Every vendored query file is present in the source tree", arguments: highlightedLanguages)
     func queryFilesExist(language: SyntaxLanguage) {
-        for file in language.queryFiles {
+        let files = language.queryFiles + [language.injectionQueryFile].compactMap { $0 }
+        for file in files {
             let url = Self.queriesRoot.appendingPathComponent(file)
             #expect(FileManager.default.fileExists(atPath: url.path), "missing \(file)")
         }

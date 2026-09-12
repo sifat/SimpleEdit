@@ -18,7 +18,7 @@ bundle is in `../html/SOURCE.md`.
 It is the newest tag there is; the repository has no 0.25 release. Java has no
 external scanner, so the relative-path scanner hazard described in
 `../css/SOURCE.md` cannot arise for this grammar at any version. The parser is
-ABI 14, like every other grammar in the app.
+ABI 14, like every grammar here except PHP and SQL.
 
 The query ships alone: upstream's `queries/` holds only `highlights.scm` and
 `tags.scm`.

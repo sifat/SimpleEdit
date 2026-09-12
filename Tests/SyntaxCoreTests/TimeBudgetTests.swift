@@ -101,11 +101,30 @@ struct TimeBudgetTests {
         let p = try parser(.html)
         let script = String(repeating: "(", count: 30_000)
         let source = "<p class=\"x\">hi</p><script>\(script)</script>"
-        let text = source as NSString
-        let words = p.tokens(for: source, budget: 0.02).tokens.map { text.substring(with: $0.range) }
-        #expect(words.contains("class"))
-        #expect(words.contains("script"))
-        #expect(!words.contains("("))
+        // The HTML around the script is cheap and would have parsed. It is
+        // discarded anyway: a cut in any child is a cut of the whole call, so
+        // the document is left plain and -- the part that matters -- the
+        // highlighter is told it was cut and spaces out the next attempts.
+        // Before this was so, the outer tokens came back as a success, the
+        // backoff reset, and this document cost the whole budget on every
+        // keystroke.
+        #expect(p.tokens(for: source, budget: 0.02).isEmpty)
+        #expect(p.lastCallWasCut)
+    }
+
+    /// The other child path. A combined injection parses through included
+    /// ranges rather than a substring, and it is the only path that calls
+    /// ts_parser_set_included_ranges under a deadline.
+    @Test("A cut inside a combined child is a cut of the whole call")
+    func combinedChildRunsOut() throws {
+        let p = try parser(.php)
+        let flood = String(repeating: "<b>", count: 30_000)
+        let source = "<?php $a = 1; ?>\n\(flood)\n<?php echo $a; ?>"
+        #expect(p.tokens(for: source, budget: 0.02).isEmpty)
+        #expect(p.lastCallWasCut)
+        // ...and the flag is not sticky: a document that fits is a success.
+        #expect(!p.tokens(for: "<?php echo 1; ?>").isEmpty)
+        #expect(!p.lastCallWasCut)
     }
 
     @Test("A zero budget still returns rather than looping")

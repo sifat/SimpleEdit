@@ -25,8 +25,11 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
 
     /// The text view and scroll view are built before either is in a window, so
     /// they need a non-degenerate starting size; autoresizing takes over after the
-    /// first layout pass.
-    private static let initialFrame = NSRect(x: 0, y: 0, width: 900, height: 640)
+    /// first layout pass. The window's default size, so the two never drift.
+    private static let initialFrame = NSRect(
+        origin: .zero,
+        size: EditorWindowController.defaultContentSize
+    )
 
     var document: TextDocument? {
         view.window?.windowController?.document as? TextDocument
@@ -129,6 +132,11 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
     func reloadDocumentText() {
         guard let document else { return }
         didLoadDocumentText = true
+        // The undo stack is not cleared here because NSDocument's revert has
+        // already done it: its default implementation "still invokes
+        // updateChangeCount:NSChangeCleared and [[self undoManager]
+        // removeAllActions]" (NSDocument.h), and TextDocument.revert calls
+        // super before this.
         applyDocumentText(document.text)
     }
 
@@ -136,26 +144,39 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
         // Assigning `string` directly does not post NSText.didChangeNotification
         // and registers no undo, so opening a file does not mark it edited.
         textView.string = text
+        documentTextDidArrive(text)
+    }
 
+    /// Everything that has to happen when the whole text changes at once rather
+    /// than through editing. One place, because assigning `string` posts no
+    /// notification, so each of these consumers has to be told by hand and it is
+    /// easy to add a third and forget one -- which is how Format JSON came to
+    /// skip the wrap decision: Minify produced the one enormous line that
+    /// `wrapDisableLineLength` exists for, with wrapping still on.
+    ///
+    /// `text` is the string the caller already holds. Scanning `textView.string`
+    /// instead bridged and copied the whole document a second time.
+    private func documentTextDidArrive(_ text: String) {
+        disableWrappingIfNeeded(for: text)
+        ruler.documentDidLoad()
+        installHighlighterIfNeeded()
+        highlighter?.documentTextDidArrive()
+    }
+
+    /// One-way on purpose: this turns wrapping off for a document with an
+    /// enormous line and never turns it back on. A user who chose to wrap a
+    /// long-lined file should not have that undone by Format JSON, and the menu
+    /// item is one keystroke away.
+    private func disableWrappingIfNeeded(for text: String) {
+        guard wrapsLines else { return }
         let longest = TextMetrics.longestLineLength(
-            in: textView.string,
+            in: text,
             stoppingAbove: Self.wrapDisableLineLength
         )
         if longest > Self.wrapDisableLineLength {
             wrapsLines = false
             applyWrapping()
         }
-        documentTextDidArrive()
-    }
-
-    /// Everything that has to happen when the whole text changes at once rather
-    /// than through editing. One place, because assigning `string` posts no
-    /// notification, so each of these consumers has to be told by hand and it is
-    /// easy to add a third and forget one.
-    private func documentTextDidArrive() {
-        ruler.documentDidLoad()
-        installHighlighterIfNeeded()
-        highlighter?.documentTextDidArrive()
     }
 
     /// Detection is by file name -- a known whole name such as `.zshrc` first,
@@ -181,9 +202,46 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
 
     // MARK: - NSTextViewDelegate
 
+    /// Deliberately does NOT touch the change count. The text view edits
+    /// through the document's own undo manager (see `undoManager(for:)`), and
+    /// NSDocument observes that manager itself: +1 when an undo group closes,
+    /// -1 on undo, +1 on redo. An explicit `updateChangeCount(.changeDone)`
+    /// here counted every keystroke twice and every undo as net zero, so a
+    /// document that was typed into and then undone back to its saved text
+    /// could never return to clean -- Close always asked to save.
     func textDidChange(_ notification: Notification) {
-        document?.updateChangeCount(.changeDone)
+        // A wholesale replacement is about to run a fresh parse of its own;
+        // the incremental one this notification would start is pure waste.
+        guard !isReplacingEntireDocument else { return }
         highlighter?.textDidChange()
+    }
+
+    /// Set while `replaceEntireDocument` swaps the text -- see there.
+    private var isReplacingEntireDocument = false
+
+    /// Every insertion comes through here -- typing, paste, drag, Replace All
+    /// -- and it is the one place that can keep the buffer LF-only. TextFileIO
+    /// normalises line endings on read and re-expands them on write; without
+    /// this, pasting a CRLF clipboard into an LF document puts carriage
+    /// returns into the buffer, and `expand` writes them straight through: the
+    /// mixed-ending file that the LineEnding type exists to prevent, arriving
+    /// through the other door. The test is byte-level on purpose -- "\r\n" is
+    /// a single Character, so `contains("\r")` is false for it.
+    func textView(
+        _ textView: NSTextView,
+        shouldChangeTextIn affectedCharRange: NSRange,
+        replacementString: String?
+    ) -> Bool {
+        guard let replacement = replacementString,
+              replacement.utf8.contains(0x0D)
+        else { return true }
+        // insertText registers undo and comes back through this hook with a
+        // string that no longer trips it; the original insertion is dropped.
+        textView.insertText(
+            TextFileIO.normaliseToLF(replacement),
+            replacementRange: affectedCharRange
+        )
+        return false
     }
 
     /// Nothing wires a text view to its document's undo manager: NSWindowController
@@ -264,9 +322,16 @@ final class EditorViewController: NSViewController, NSTextViewDelegate {
         storage.beginEditing()
         storage.replaceCharacters(in: whole, with: newText)
         storage.endEditing()
+        // didChangeText is required after editing the storage directly: it is
+        // what registers the change with undo and posts the notification. But
+        // the reparse that notification triggers is redundant with the fresh
+        // one documentTextDidArrive runs next, so it is suppressed. Before
+        // this, Format JSON parsed the whole document twice.
+        isReplacingEntireDocument = true
         textView.didChangeText()
+        isReplacingEntireDocument = false
 
-        documentTextDidArrive()
+        documentTextDidArrive(newText)
     }
 
     private func present(_ error: JSONToolError, in body: String, bomOffset: Int) {

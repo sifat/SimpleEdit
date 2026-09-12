@@ -3,10 +3,16 @@
 // Run:  xcrun swift tools/appicon/make-icon.swift
 //
 // Kept in the repo so the icon is reproducible rather than a binary blob nobody
-// can edit. Draws at 1024 and downsamples to every size the iconset needs.
+// can edit. Every size is drawn at its own pixel size -- see drawIcon -- so the
+// small ones stay crisp instead of being a blurry downsample of the 1024.
 import AppKit
 
-let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+// The repo root, from this file's own path rather than the working directory,
+// so the script writes to the right place wherever it is run from.
+let root = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent()   // tools/appicon
+    .deletingLastPathComponent()   // tools
+    .deletingLastPathComponent()   // repo root
 let iconset = root.appendingPathComponent("build/AppIcon.iconset")
 let output = root.appendingPathComponent("Resources/AppIcon.icns")
 

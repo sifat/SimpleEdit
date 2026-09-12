@@ -49,20 +49,28 @@ The download is a universal binary, so it runs on both Apple Silicon and Intel M
 
 ## Cutting a release
 
-```sh
-./build.sh --universal --zip     # -> build/SimpleEdit.zip
-```
+The flow every release has followed, written down because the version bump is
+the step that gets forgotten: v1.3's build number carried three new languages
+before anyone noticed.
 
-Then create the release and attach the zip — either through the web UI
-(repo ▸ Releases ▸ Draft a new release) or with the API:
+1. On `development`, bump `CFBundleShortVersionString` and `CFBundleVersion` in
+   `Resources/Info.plist` and write `docs/release-notes/vX.Y.md`.
+2. Merge `development` into `early-release`, then `early-release` into `master`
+   as `Release vX.Y`, and tag that merge: `git tag vX.Y`.
+3. On `master` at the tag:
 
-```sh
-gh release create v1.1 build/SimpleEdit.zip --title "SimpleEdit 1.1" --notes-file NOTES.md
-```
+   ```sh
+   ./build.sh --universal --zip     # -> build/SimpleEdit.zip
+   gh release create vX.Y build/SimpleEdit.zip --title "SimpleEdit X.Y" \
+       --notes-file docs/release-notes/vX.Y.md
+   ```
 
-Always use `--universal`; a default build is arm64-only and will not launch on an
-Intel Mac. Put the `xattr` instruction in the release notes, or the first thing
-anyone downloading it will hit is "damaged".
+`build.sh --zip` refuses unless `HEAD` carries a tag equal to the plist version,
+so step 1 cannot be skipped by accident; `ALLOW_UNTAGGED_ZIP=1` overrides it for
+a build that is shared but not released. Always use `--universal`; a default
+build is arm64-only and will not launch on an Intel Mac. Put the `xattr`
+instruction in the release notes, or the first thing anyone downloading it will
+hit is "damaged".
 
 ## Build and run
 
@@ -79,9 +87,9 @@ go test ./tools/jsonfmt                             # JSON golden tests
 ```
 
 `Package.resolved` is committed deliberately: it is the only record of which
-grammar commit a given build shipped. The first resolve is slow — `swift-tree-sitter`
-carries a git submodule (a Swift grammar this project never uses) that SwiftPM
-clones anyway.
+grammar commit a given build shipped. The first build is slow rather than the
+resolve: `tree-sitter-sql`'s generated `parser.c` is 41.6 MB, and a universal
+build compiles it twice.
 
 ### Debugging
 
@@ -255,17 +263,25 @@ capture fails the suite instead of silently un-colouring something.
   | --- | --- |
   | Java, JDK and Android sources | 0.07–0.14 ms/KB |
   | JavaScript, library code | 0.07 ms/KB |
-  | CSS, real stylesheets | 0.12 ms/KB |
   | Shell, real bash scripts | 0.10–0.16 ms/KB |
-  | Python, standard library | 0.14–0.20 ms/KB |
+  | CSS, real stylesheets | 0.12 ms/KB |
   | PHP, WordPress templates | 0.13–0.21 ms/KB |
+  | Python, standard library | 0.14–0.20 ms/KB |
+  | HTML, markup with inline JavaScript | 0.21 ms/KB |
   | JavaScript, dense component code | 0.21 ms/KB |
+  | SQL, hand-written, dense | 0.22 ms/KB |
+  | TypeScript, dense | 0.22 ms/KB |
   | HTML, tag-dense markup | 0.26 ms/KB |
   | Java, dense streams and lambdas | 0.32 ms/KB |
+  | Shell, zsh-specific syntax | 0.37 ms/KB |
   | Shell, dense bash | 0.38 ms/KB |
-  | SQL, hand-written, dense | 0.22 ms/KB |
   | PHP, dense template, markup and code both | 0.42 ms/KB |
+  | Python, dense comprehensions | 0.49 ms/KB |
   | SQL, a mysqldump file near its cap | 0.25–0.81 ms/KB |
+
+  Every rate is a fresh full parse and query, release build, on an Apple Silicon
+  laptop; this table is the only home for these numbers. The per-keystroke cost
+  with the incremental parse is lower — about half, on ordinary files.
   | Python, dense comprehensions | 0.49 ms/KB |
 
   A 64 KB file of the densest markup is about 17 ms here. The cap is sized so that
@@ -276,8 +292,10 @@ capture fails the suite instead of silently un-colouring something.
   Java makes the same trade: large JDK files such as `HashMap.java` stay plain.
   PHP keeps the same cap for a different reason: it pays for two grammars on every
   keystroke, its own and the HTML around it, and a 64 KB template of dense markup
-  and dense code costs about 27 ms — just under dense Python, which set this bar.
-  Real templates are far cheaper: WordPress's 62 KB `media-template.php` is 12 ms.
+  and dense code costs about 27 ms for a full parse (29 ms per keystroke, median,
+  with the incremental reuse) — just under dense Python, which set this bar. Real
+  templates are far cheaper: WordPress's 62 KB `media-template.php` is 12 ms
+  (14 ms per keystroke).
   **SQL caps at 32 KB**, half of everything else, and it is the one language whose
   cap is set by broken files rather than dense ones. Dense hand-written SQL is
   cheap — 64 KB of it is 14 ms — but the `.sql` files that exist on disk are
@@ -397,13 +415,13 @@ PDF export), and autosave recovery — an unsaved edit survives `kill -9` while 
 file on disk stays byte-identical.
 
 Syntax highlighting was checked the same way, in a running app rather than only
-under test: all four languages on real files, a single page carrying inline
-`<style>` and `<script>` with all three grammars colouring at once, colour following
+under test: every language on real files, a single page carrying inline
+`<style>` and `<script>` with three grammars colouring at once, colour following
 live typing, Dark mode re-resolving every colour with no code involved, a saved file
 byte-identical to what was typed, and opening then closing a highlighted document
 raising no unsaved-changes sheet — the last two being the properties the whole
 rendering-attributes design exists to protect. The time budget was checked the same
-way: a 49 KB page that the old cap excluded is coloured, and 64 KB of unclosed `<b>`
+way: a 49 KB page that the original 32 KB cap excluded is coloured, and 64 KB of unclosed `<b>`
 — 1.6 s per keystroke unbounded — opens plain, takes typing, and the app stays
 responsive.
 
@@ -445,8 +463,12 @@ Nothing else is planned for the next release.
   large still pays a rescan per frame, which is what an incremental index would
   fix if it ever becomes worth doing.
 - **Encoding detection is a guess** when a file is not UTF-8, and there is no
-  encoding menu. Line endings (LF/CRLF/CR) and a UTF-8 BOM are detected on open and
-  restored on save.
+  encoding menu. A character the detected encoding cannot hold makes the file
+  UTF-8 on the next save, and it stays UTF-8 from then on; nothing tells you.
+  Line endings (LF/CRLF/CR) and a UTF-8 BOM are detected on open and restored on
+  save — but a file whose endings are **mixed** is rewritten wholesale to
+  whichever kind appears first, on lines you never touched, the first time it is
+  saved.
 - **Printing reflows for the paper.** Print builds a throwaway text view sized to
   the page rather than printing the one on screen, so the line-number gutter does
   not appear on paper and a document with wrapping turned off does not print as one

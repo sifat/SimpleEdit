@@ -26,6 +26,8 @@ public struct LineIndex: Sendable, Equatable {
     }
 
     private static let lineFeed: UInt16 = 0x000A
+    private static let carriageReturn: UInt16 = 0x000D
+    private static let paragraphSeparator: UInt16 = 0x2029
 
     /// Builds the index, or returns nil if the document is longer than
     /// `maximumLength` UTF-16 units.
@@ -38,14 +40,41 @@ public struct LineIndex: Sendable, Equatable {
     /// The size check happens during the scan rather than up front, so an
     /// oversized document stops after `maximumLength` units instead of being
     /// walked to the end to learn something we already know.
+    ///
+    /// A "line" here is what TextKit calls a paragraph, because that is what the
+    /// gutter numbers: TextKit 2 produces one layout fragment per paragraph, and
+    /// the ruler maps each fragment's offset through `lineNumber(containing:)`.
+    /// So the breaks counted are exactly Foundation's paragraph separators --
+    /// LF, CR, CRLF as one, and U+2029 -- and not its line separators (U+2028,
+    /// U+0085), which break a line inside a paragraph without starting a new
+    /// fragment. Counting only LF looked right because files are normalised to
+    /// LF on read; text pasted from elsewhere is not, and every number below
+    /// the first stray CR or U+2029 was then off by one. Pinned against
+    /// `NSString.getParagraphStart` in the tests.
     public init?(_ text: String, maximumLength: Int) {
         var starts: [Int] = [0]
         var offset = 0
+        var previousWasCR = false
         for unit in text.utf16 {
             offset += 1
             if offset > maximumLength { return nil }
-            // A trailing newline opens a final empty line, so "a\n" is [0, 2].
-            if unit == Self.lineFeed { starts.append(offset) }
+            switch unit {
+            case Self.lineFeed:
+                // The LF of a CRLF pair: the CR already opened the line, one
+                // unit early. Move that start rather than adding a second.
+                if previousWasCR {
+                    starts[starts.count - 1] = offset
+                } else {
+                    // A trailing newline opens a final empty line, so "a\n"
+                    // is [0, 2].
+                    starts.append(offset)
+                }
+            case Self.carriageReturn, Self.paragraphSeparator:
+                starts.append(offset)
+            default:
+                break
+            }
+            previousWasCR = unit == Self.carriageReturn
         }
         lineStarts = starts
         length = offset
