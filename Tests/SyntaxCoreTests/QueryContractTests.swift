@@ -56,6 +56,12 @@ struct QueryContractTests {
             "function.method", "keyword", "number", "operator", "string",
             "string.escape", "type", "type.builtin", "variable", "variable.builtin",
         ],
+        .php: [
+            "comment", "constant", "constant.builtin", "constructor", "function",
+            "function.builtin", "function.method", "keyword", "module", "module.builtin",
+            "number", "operator", "property", "string", "tag", "type", "type.builtin",
+            "variable", "variable.builtin",
+        ],
     ]
 
     /// Captures a language emits and this app deliberately does not colour.

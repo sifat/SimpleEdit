@@ -120,6 +120,19 @@ struct SyntaxLanguageTests {
         #expect(SyntaxLanguage(fileExtension: "jar") == nil)
     }
 
+    @Test("PHP is detected by extension, templates included")
+    func phpExtensions() {
+        #expect(SyntaxLanguage(fileExtension: "php") == .php)
+        #expect(SyntaxLanguage(fileExtension: "PHP") == .php)
+        #expect(SyntaxLanguage(fileName: "index.php") == .php)
+        #expect(SyntaxLanguage(fileName: "header.phtml") == .php)
+        // Drupal's PHP-by-convention extensions are deliberately not claimed:
+        // `.inc` is not PHP anywhere else. See Resources/Queries/php/SOURCE.md.
+        #expect(SyntaxLanguage(fileExtension: "module") == nil)
+        #expect(SyntaxLanguage(fileExtension: "inc") == nil)
+        #expect(SyntaxLanguage(fileExtension: "theme") == nil)
+    }
+
     /// The cap is a measured number, and a language that has a grammar but no
     /// cap would be highlighted at any size -- the failure the cap prevents.
     @Test("Every highlighted language caps its document size")

@@ -3,7 +3,7 @@
 A small native macOS text editor. Swift + AppKit + `NSDocument`, built with SwiftPM,
 wrapped into a `.app` by a shell script. No Electron, no xcodeproj, no xib.
 
-Eight third-party dependencies, all pinned to exact versions, all for syntax
+Nine third-party dependencies, all pinned to exact versions, all for syntax
 highlighting, and **all of them C**:
 [`tree-sitter`](https://github.com/tree-sitter/tree-sitter) itself plus the
 [HTML](https://github.com/tree-sitter/tree-sitter-html),
@@ -11,8 +11,9 @@ highlighting, and **all of them C**:
 [JavaScript](https://github.com/tree-sitter/tree-sitter-javascript),
 [TypeScript](https://github.com/tree-sitter/tree-sitter-typescript),
 [Python](https://github.com/tree-sitter/tree-sitter-python),
-[Bash](https://github.com/tree-sitter/tree-sitter-bash) and
-[Java](https://github.com/tree-sitter/tree-sitter-java) grammars. There is
+[Bash](https://github.com/tree-sitter/tree-sitter-bash),
+[Java](https://github.com/tree-sitter/tree-sitter-java) and
+[PHP](https://github.com/tree-sitter/tree-sitter-php) grammars. There is
 no Swift binding in between — the query loop talks to the C API directly, because the
 binding allocated an object per capture and that was most of the cost of highlighting.
 Each grammar's highlight query is vendored into `Resources/Queries/` under its MIT
@@ -167,7 +168,8 @@ matches, and the Replace disclosure reveals a `Replace` button (one at a time) a
 **HTML** (`.html`, `.htm`), **CSS** (`.css`), **JavaScript** (`.js`, `.mjs`, `.cjs`),
 **TypeScript** (`.ts`, `.mts`, `.cts`), **Python** (`.py`, `.pyi`, `.pyw`),
 **Shell** (`.sh`, `.bash`, `.zsh`, `.command`, and dotfiles such as `.zshrc` and
-`.bashrc`) and **Java** (`.java`) are coloured. Nothing else is, and nothing needs turning on: the language
+`.bashrc`), **Java** (`.java`) and **PHP** (`.php`, `.phtml`) are coloured. Nothing
+else is, and nothing needs turning on: the language
 is detected from the file name when the document opens — a known dotfile name first,
 then the extension.
 
@@ -175,6 +177,19 @@ Inside an HTML page, `<style>` and `<script>` bodies are coloured as CSS and
 JavaScript. The HTML grammar hands those over as one opaque node, so each is
 re-parsed with its own grammar and the results are merged back into the document's
 own offsets.
+
+A PHP file is two documents interleaved, and it is coloured as both. The text
+outside `<?php … ?>` is HTML, and it is handed to the HTML grammar as **one
+combined document** rather than as a series of fragments: a template opens a
+`<div>` above a `<?php` and closes it below the matching `?>`, so parsing each
+fragment separately would report unbalanced tags that are not in the file.
+tree-sitter is instead given every fragment's range at once and lexes them as one
+continuous stream, skipping the PHP. Measured over 381 WordPress templates, that
+is the difference between 521 error nodes and 126. The HTML then injects its own
+`<style>` and `<script>`, so a template nests three languages deep — the only
+place in the app that goes past one. Tokens from an inner language are cut back
+to its own ranges, which is what stops one HTML attribute value from swallowing
+the PHP echoed inside it.
 
 The parse is **incremental**. The highlighter is the text storage's delegate, and
 every character edit — typing, paste, undo, Replace All — is reported to tree-sitter
@@ -242,10 +257,12 @@ capture fails the suite instead of silently un-colouring something.
   | CSS, real stylesheets | 0.12 ms/KB |
   | Shell, real bash scripts | 0.10–0.16 ms/KB |
   | Python, standard library | 0.14–0.20 ms/KB |
+  | PHP, WordPress templates | 0.13–0.21 ms/KB |
   | JavaScript, dense component code | 0.21 ms/KB |
   | HTML, tag-dense markup | 0.26 ms/KB |
   | Java, dense streams and lambdas | 0.32 ms/KB |
   | Shell, dense bash | 0.38 ms/KB |
+  | PHP, dense template, markup and code both | 0.42 ms/KB |
   | Python, dense comprehensions | 0.49 ms/KB |
 
   A 64 KB file of the densest markup is about 17 ms here. The cap is sized so that
@@ -254,6 +271,10 @@ capture fails the suite instead of silently un-colouring something.
   are often large, but dense Python is the most expensive code measured in any
   language, so it keeps the 64 KB cap and big standard-library modules stay plain.
   Java makes the same trade: large JDK files such as `HashMap.java` stay plain.
+  PHP keeps the same cap for a different reason: it pays for two grammars on every
+  keystroke, its own and the HTML around it, and a 64 KB template of dense markup
+  and dense code costs about 27 ms — just under dense Python, which set this bar.
+  Real templates are far cheaper: WordPress's 62 KB `media-template.php` is 12 ms.
 - **A hostile or half-typed file is left plain, not frozen on.** The size cap
   cannot bound the worst case, because the worst case is nesting depth and
   unbalanced brackets — quadratic, and reachable from an ordinary file mid-edit:
@@ -273,6 +294,19 @@ capture fails the suite instead of silently un-colouring something.
   their substring each time, because that substring moves and changes wholesale with
   every edit around it. A page whose bulk is one big inline script gains little from
   the incremental parse (measured 1.1× against 2× for everything else).
+- **Only the HTML inside a PHP file is injected.** Upstream's PHP grammar can also
+  inject phpdoc into comments and name a heredoc's language after its terminator
+  (`<<<SQL`); neither grammar is vendored, so `/** … */` colours as a plain comment
+  and a heredoc body as a plain string. Drupal's `.module`, `.inc`, `.install` and
+  `.theme` are PHP too but are not claimed, because `.inc` is not PHP anywhere else.
+- **A few valid PHP names are parsed as errors.** The pinned grammar adopted PHP's
+  reserved-word rules, which reject `const FALSE` (and `TRUE`, `MIXED`, `ITERABLE`,
+  `VOID`), keyword properties inside double-quoted strings such as `"$obj->class"`,
+  and a global `function readonly()`. Across 45,818 files of WordPress and Drupal
+  that is 5 files, losing 8–29 characters of colour each. The alternative was the
+  newest grammar that predates the change, which cannot parse an enum containing a
+  `const` at all — 6 of 6 such files in a real Drupal tree, up to a quarter of a
+  file uncoloured. `Resources/Queries/php/SOURCE.md` has the measurements.
 - **A shell script with no extension is not detected.** Dotfiles are recognised by
   name, but a script recognisable only by its `#!/bin/bash` line stays plain. zsh
   files colour less completely than Bash, because the grammar is Bash and zsh-only
@@ -361,7 +395,7 @@ bug in how Close routes through the responder chain.
 Planned for the next version, in no particular order.
 
 - **More languages for syntax highlighting**, one at a time. HTML, CSS, JavaScript,
-  TypeScript, Python, Shell and Java ship; php and sql remain. Each is an enum case, a
+  TypeScript, Python, Shell, Java and PHP ship; sql remains. Each is an enum case, a
   vendored query directory and a package dependency — see
   [Syntax highlighting](#syntax-highlighting). SQL is the odd one out: there is no
   grammar under the tree-sitter organisation, so it would be the first dependency

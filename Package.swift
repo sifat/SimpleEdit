@@ -55,6 +55,13 @@ let package = Package(
         // 0.23.5 is the newest tag there is. Java has no external scanner, so
         // the scanner hazard the other pins guard against cannot arise here.
         .package(url: "https://github.com/tree-sitter/tree-sitter-java", exact: "0.23.5"),
+        // 0.24.2, and the first ABI 15 grammar here -- an exception argued in
+        // Resources/Queries/php/SOURCE.md rather than taken lightly. The short
+        // of it: no ABI 14 tag parses an enum that declares a `const`, which
+        // broke 6 of 6 such files in a real Drupal 10 tree, and upstream's
+        // master is ABI 15 only, so no later fix will ever reach one. Core is
+        // 0.25.10, which accepts ABI 13-15.
+        .package(url: "https://github.com/tree-sitter/tree-sitter-php", exact: "0.24.2"),
     ],
     targets: [
         // Foundation only, no AppKit — so `swift test` can cover the parts where a
@@ -81,6 +88,10 @@ let package = Package(
                 .product(name: "TreeSitterPython", package: "tree-sitter-python"),
                 .product(name: "TreeSitterBash", package: "tree-sitter-bash"),
                 .product(name: "TreeSitterJava", package: "tree-sitter-java"),
+                // The package builds two grammars, php and php_only. Only
+                // tree_sitter_php() is referenced, so the linker drops the
+                // other; it is still compiled.
+                .product(name: "TreeSitterPHP", package: "tree-sitter-php"),
             ],
             swiftSettings: swiftSettings
         ),
