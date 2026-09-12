@@ -133,6 +133,14 @@ struct SyntaxLanguageTests {
         #expect(SyntaxLanguage(fileExtension: "theme") == nil)
     }
 
+    @Test("SQL is detected by extension")
+    func sqlExtensions() {
+        #expect(SyntaxLanguage(fileExtension: "sql") == .sql)
+        #expect(SyntaxLanguage(fileName: "schema.SQL") == .sql)
+        #expect(SyntaxLanguage(fileExtension: "db") == nil)
+        #expect(SyntaxLanguage(fileExtension: "sqlite") == nil)
+    }
+
     /// The cap is a measured number, and a language that has a grammar but no
     /// cap would be highlighted at any size -- the failure the cap prevents.
     @Test("Every highlighted language caps its document size")

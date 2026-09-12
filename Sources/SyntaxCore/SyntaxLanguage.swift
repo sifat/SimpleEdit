@@ -15,6 +15,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
     case shell
     case java
     case php
+    case sql
 
     public var title: String {
         switch self {
@@ -27,6 +28,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         case .shell: "Shell"
         case .java: "Java"
         case .php: "PHP"
+        case .sql: "SQL"
         }
     }
 
@@ -44,6 +46,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         case .shell: 6
         case .java: 7
         case .php: 8
+        case .sql: 9
         }
     }
 
@@ -76,6 +79,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         // Drupal's `.module`, `.inc`, `.install` and `.theme` are PHP too, but
         // `.inc` in particular is not PHP anywhere else, so they are left out.
         case .php: ["php", "phtml"]
+        case .sql: ["sql"]
         }
     }
 
@@ -184,6 +188,25 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         // sets at this cap -- and real templates are far cheaper: WordPress's
         // 62 KB media-template.php is 14 ms.
         case .php: 64 * 1024
+        // SQL is the one language whose cap is set by BROKEN files rather than
+        // by dense ones, and it is half everything else's because of what a
+        // real .sql file is. Dense hand-written SQL is cheap -- 64 KB of it
+        // measures 14 ms -- but the .sql files that exist on disk are database
+        // dumps, and this grammar cannot parse a mysqldump (see
+        // Resources/Queries/sql/SOURCE.md). Error recovery over one enormous
+        // statement is what costs, and the cost is superlinear in how much of
+        // that statement is in the file. Measured on a real 71 KB dump whose
+        // longest line is 70,081 characters, one INSERT with hundreds of rows:
+        //
+        //     32 KB  7.8 ms   0.25 ms/KB
+        //     48 KB 16.1 ms   0.34 ms/KB
+        //     56 KB 35.0 ms   0.63 ms/KB
+        //     64 KB 51.8 ms   0.81 ms/KB
+        //
+        // At 64 KB that is 130 ms on hardware 2.5x slower -- past the budget,
+        // so the document would be cut to plain on every attempt. At 32 KB it
+        // is about 20 ms there, which is the headroom every other cap has.
+        case .sql: 32 * 1024
         }
     }
 
@@ -266,6 +289,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         case .shell: "bash"
         case .java: "java"
         case .php: "php"
+        case .sql: "sql"
         }
     }
 }

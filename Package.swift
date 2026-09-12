@@ -62,6 +62,20 @@ let package = Package(
         // master is ABI 15 only, so no later fix will ever reach one. Core is
         // 0.25.10, which accepts ABI 13-15.
         .package(url: "https://github.com/tree-sitter/tree-sitter-php", exact: "0.24.2"),
+        // SQL is the first dependency from outside the tree-sitter organisation,
+        // and the first pinned by REVISION rather than by tag. It has to be:
+        // this grammar does not commit its generated parser.c, so its tags
+        // cannot build -- their own Package.swift lists a file that is not
+        // there. Upstream publishes the generated sources to the `gh-pages`
+        // branch instead, one "deploy: <main sha>" commit per change, and that
+        // branch keeps its history rather than being force-replaced, so a
+        // revision pin stays fetchable. This one is the deploy of main
+        // b7057b7 (2026-09-10). Its test-only dependency on swift-tree-sitter
+        // is pruned: Package.resolved gains one pin, not two.
+        .package(
+            url: "https://github.com/DerekStride/tree-sitter-sql",
+            revision: "593a5ecc5dc3889890d8b24ba8fa7487ee01bfe5"
+        ),
     ],
     targets: [
         // Foundation only, no AppKit — so `swift test` can cover the parts where a
@@ -92,6 +106,9 @@ let package = Package(
                 // tree_sitter_php() is referenced, so the linker drops the
                 // other; it is still compiled.
                 .product(name: "TreeSitterPHP", package: "tree-sitter-php"),
+                // By far the largest grammar here: 11.2 MB of compiled parse
+                // tables per architecture, against 1.5 MB for the next biggest.
+                .product(name: "TreeSitterSql", package: "tree-sitter-sql"),
             ],
             swiftSettings: swiftSettings
         ),

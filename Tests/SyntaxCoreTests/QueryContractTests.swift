@@ -62,6 +62,13 @@ struct QueryContractTests {
             "number", "operator", "property", "string", "tag", "type", "type.builtin",
             "variable", "variable.builtin",
         ],
+        .sql: [
+            "attribute", "boolean", "comment", "conditional", "field", "float",
+            "function.call", "keyword", "keyword.operator", "number", "operator",
+            "parameter", "punctuation.bracket", "punctuation.delimiter", "spell",
+            "storageclass", "string", "type", "type.builtin", "type.qualifier",
+            "variable",
+        ],
     ]
 
     /// Captures a language emits and this app deliberately does not colour.
@@ -76,6 +83,10 @@ struct QueryContractTests {
         .python: ["variable", "constructor", "embedded", "escape"],
         .shell: ["embedded"],
         .java: ["variable"],
+        // Neovim's marker for "spell-check this region", captured over the same
+        // comments as `@comment`. Not a colour, and colouring it would put two
+        // kinds on one range.
+        .sql: ["spell"],
     ]
 
     /// Reads every file the language composes its query from, not just its own

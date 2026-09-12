@@ -184,6 +184,34 @@ public enum SyntaxTokenKind: String, Sendable, CaseIterable {
             "module": .type,
             "module.builtin": .keyword,
         ],
+        // SQL's query is the only vendored one written for Neovim rather than
+        // for tree-sitter's own tooling, and it shows in the capture names:
+        // half of them are Neovim's vocabulary, which no other grammar here
+        // uses. Each is mapped to the nearest thing this app already has.
+        //
+        // - `conditional` (CASE/WHEN/THEN/ELSE), `storageclass` (TEMPORARY,
+        //   MATERIALIZED) and `type.qualifier` (UNIQUE, CASCADE, CHECK) are all
+        //   keywords by any reading; only Neovim's themes separate them.
+        // - `field` is a column name and `parameter` a `$1` placeholder; both
+        //   read as the identifiers they are, which is `property` here.
+        // - `boolean` and `float` are literals, like `number`.
+        // - `type` must be overridden because the shared row means CSS's unit:
+        //   in SQL it is a table or object name.
+        // - `spell` is unmapped ON PURPOSE. It is not a colour at all -- it
+        //   marks regions for Neovim's spell checker, and it is captured over
+        //   the same comments as `@comment`. Colouring it would put a second
+        //   kind on an identical range and leave the winner to a tie-break.
+        .sql: [
+            "boolean": .constant,
+            "conditional": .keyword,
+            "field": .property,
+            "float": .constant,
+            "parameter": .property,
+            "spell": nil,
+            "storageclass": .keyword,
+            "type": .type,
+            "type.qualifier": .keyword,
+        ],
     ]
 
     /// The union of every vendored query's capture names. Adding a language
