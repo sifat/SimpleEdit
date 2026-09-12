@@ -128,6 +128,8 @@ struct IncrementalParseTests {
         "    ", "\t", ":\n    ", "def g():", "f\"{x}\"", "lambda y: y", "@deco",
         // Shell: heredoc openers and closers, substitutions, quoting.
         "<<EOF\n", "\nEOF\n", "$(", "${", "<(", "2>&1", "; then", "\nfi", "-la", "|",
+        // Java: generics, annotations, block comments, character literals.
+        "<T>", "@Override\n", "/** doc */", "'c'", "new List<>()", "public static ",
     ]
 
     /// tree-sitter points: row is the number of newlines before the offset,
@@ -280,6 +282,60 @@ struct IncrementalParseTests {
         try runDifferential(.typescript, seed: seed, initial: Self.typescript, edits: 150)
     }
 
+    /// A PHP template, which is the hardest shape in the app: PHP with a
+    /// retained tree, the HTML around it re-parsed on every keystroke through
+    /// included ranges as ONE combined document, and that HTML's own
+    /// `<script>` and `<style>` injected a level deeper again. Elements
+    /// deliberately open in one fragment and close in another, so a walk that
+    /// breaks a `<?php` tag rearranges which text is HTML at all.
+    private static let php = """
+    <?php
+    declare(strict_types=1);
+    namespace Shop\\View;
+
+    use Shop\\Models\\Cart;
+
+    const TAX_RATE = 0.0825;
+
+    function money(float $amount): string {
+        // Two decimal places, always.
+        return number_format($amount, 2);
+    }
+
+    $cart = new Cart($items);
+    $total = $cart->subtotal() * (1 + TAX_RATE);
+    ?>
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+      <title><?= htmlspecialchars($title) ?></title>
+      <style>
+        .row { color: #ff0088; padding: 0 1.5rem; }
+      </style>
+    </head>
+    <body class="page">
+      <?php if ($cart->isEmpty()) { ?>
+        <p class="empty">Nothing here.</p>
+      <?php } else { ?>
+        <ul id="items" data-total="<?= money($total) ?>">
+          <?php foreach ($cart->items as $item) { ?>
+            <li class="<?= $item->cls ?>"><?= money($item->price) ?></li>
+          <?php } ?>
+        </ul>
+      <?php } ?>
+      <script>
+        const TAX = 0.0825;
+        function render(n) { return `${n * (1 + TAX)}`; }
+      </script>
+    </body>
+    </html>
+    """
+
+    @Test("PHP templates survive random edits", arguments: [41, 42, 43] as [UInt64])
+    func php(seed: UInt64) throws {
+        try runDifferential(.php, seed: seed, initial: Self.php, edits: 150)
+    }
+
     private static let python = """
     # Cart totals.
     from dataclasses import dataclass
@@ -339,6 +395,33 @@ struct IncrementalParseTests {
     @Test("Shell survives random edits", arguments: [81, 82, 83, 84] as [UInt64])
     func shell(seed: UInt64) throws {
         try runDifferential(.shell, seed: seed, initial: Self.shell, edits: 150)
+    }
+
+    private static let java = """
+    package com.sifat.cart;
+
+    import java.util.ArrayList;
+    import java.util.List;
+
+    /** Cart totals. */
+    public final class Cart<T extends Item> {
+        private static final double TAX_RATE = 0.0825;
+        private final List<T> items = new ArrayList<>();
+
+        @Override
+        public String toString() { return "Cart(" + items.size() + ")"; }
+
+        public double total() {
+            double sum = 0;
+            for (T item : items) { sum += item.price() * (1 + TAX_RATE); }
+            return this.round(sum);
+        }
+    }
+    """
+
+    @Test("Java survives random edits", arguments: [91, 92, 93] as [UInt64])
+    func java(seed: UInt64) throws {
+        try runDifferential(.java, seed: seed, initial: Self.java, edits: 150)
     }
 
     @Test("CSS survives random edits", arguments: [31, 32, 33] as [UInt64])
@@ -453,8 +536,40 @@ struct IncrementalParseTests {
         _ = p.tokens(for: "const a = 1;")
         p.noteEdit(SyntaxParser.TextEdit(start: 5, oldEnd: 4, newEnd: 9))       // start > oldEnd
         p.noteEdit(SyntaxParser.TextEdit(start: 0, oldEnd: 500, newEnd: 500))   // beyond the text
+        // Past tree-sitter's 32-bit offsets. These used to trap in the UInt32
+        // conversion rather than discard the tree like the two above.
+        p.noteEdit(SyntaxParser.TextEdit(start: 0, oldEnd: 0, newEnd: 3_000_000_000))
+        p.noteEdit(SyntaxParser.TextEdit(start: 0, oldEnd: 0, newEnd: Int.max))
         let next = "const b = 2;"
         #expect(p.tokens(for: next) == fresh.tokens(for: next))
+    }
+
+    /// The same-length footgun again, this time after a cut. A cut keeps the
+    /// edited tree so the next keystroke can reuse it -- but only once that
+    /// keystroke has been reported. Left armed across the cut, the guard let
+    /// an unreported change slip through: the tree still said `const` where
+    /// the text now said `//`.
+    @Test("After a cut, reuse needs a fresh edit report")
+    func cutDoesNotKeepReuseArmed() throws {
+        let p = try parser(.javascript)
+        let fresh = try parser(.javascript)
+        // Large enough that a zero budget is actually cut: the progress
+        // callback fires every so many parse steps, not per call.
+        let body = String(repeating: Self.javascript + "\n", count: 60)
+        let a = "const a = 1;\n" + body
+        _ = p.tokens(for: a, budget: Self.ample)
+
+        let b = "const b = 1;\n" + body
+        p.noteEdit(SyntaxParser.TextEdit(start: 6, oldEnd: 7, newEnd: 7))
+        _ = p.tokens(for: b, budget: 0)
+        #expect(p.lastCallWasCut)
+
+        // Same length as b, changed somewhere the reported edit never touched,
+        // and NOT reported.
+        let c = "//nst b = 1;\n" + body
+        let got = p.tokens(for: c, budget: Self.ample)
+        #expect(got == fresh.tokens(for: c, budget: Self.ample))
+        #expect(got.tokens.first?.kind == .comment)
     }
 
     /// Edits reported to a parser that has no tree are simply ignored.

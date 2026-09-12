@@ -32,8 +32,8 @@ compose.
 Only `#match?`, three times: the `^[A-Z]` constructor guess, the
 `^[A-Z][A-Z_]*$` constant guess, and one long alternation naming the builtin
 functions. All three are evaluated. The builtins list is a regex rather than
-`#any-of?`, which matters: `#any-of?` is not evaluated by `SyntaxParser` and
-would pass unconditionally, colouring every called name as a builtin.
+`#any-of?` because that is how upstream wrote it; `SyntaxParser` evaluates
+`#any-of?` as well (PHP's query depends on it), so either form would filter.
 
 ## Captures this app does not colour
 

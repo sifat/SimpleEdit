@@ -3,8 +3,11 @@ import TreeSitter
 import TreeSitterBash
 import TreeSitterCSS
 import TreeSitterHTML
+import TreeSitterJava
 import TreeSitterJavaScript
+import TreeSitterPHP
 import TreeSitterPython
+import TreeSitterSql
 import TreeSitterTypeScript
 
 /// Turns source text into tokens. One per document.
@@ -51,10 +54,21 @@ public final class SyntaxParser {
     /// Built on first use and kept, because building one compiles a query.
     private var children: [SyntaxLanguage: SyntaxParser] = [:]
 
+    /// How deep injections may nest. 0 is the document's own parser, and each
+    /// level of embedding is one more. Two, because PHP needs two: a `.php`
+    /// file is PHP, the text between its `?>` and `<?php` is one HTML
+    /// document, and that HTML has its own `<script>` and `<style>`. Nothing
+    /// vendored needs three, and the constant is what stops a grammar whose
+    /// injections.scm names itself from recursing for ever.
+    static let maximumInjectionDepth = 2
+
+    /// 0 for a document's own parser, one more for each level of injection.
+    private let depth: Int
+
     /// Only a document's own parser keeps a tree between calls. A child
-    /// parses a substring that moves and changes wholesale with every edit of
-    /// the document around it, so there is nothing for it to reuse.
-    private let isTopLevel: Bool
+    /// parses a region that moves and changes wholesale with every edit of the
+    /// document around it, so there is nothing for it to reuse.
+    private var isTopLevel: Bool { depth == 0 }
 
     /// The last tree this parser produced, with every edit reported since
     /// applied to it through `ts_tree_edit`, so the next parse can reuse the
@@ -80,10 +94,10 @@ public final class SyntaxParser {
     /// from a file inside the app bundle, and a `try!` here would turn a
     /// packaging mistake into a crash on open.
     public convenience init?(language: SyntaxLanguage, queriesRoot: URL) {
-        self.init(language: language, queriesRoot: queriesRoot, allowsInjections: true)
+        self.init(language: language, queriesRoot: queriesRoot, depth: 0)
     }
 
-    private init?(language: SyntaxLanguage, queriesRoot: URL, allowsInjections: Bool) {
+    private init?(language: SyntaxLanguage, queriesRoot: URL, depth: Int) {
         guard let tsLanguage = Self.grammar(for: language),
               let source = Self.queryText(for: language.queryFiles, root: queriesRoot),
               let query = Self.compile(source, language: tsLanguage),
@@ -100,7 +114,7 @@ public final class SyntaxParser {
 
         self.language = language
         self.queriesRoot = queriesRoot
-        self.isTopLevel = allowsInjections
+        self.depth = depth
         self.parser = parser
         self.query = query
         self.cursor = cursor
@@ -109,10 +123,11 @@ public final class SyntaxParser {
 
         // An injections query that fails to load leaves the document
         // highlighted as plain HTML rather than not at all -- the same
-        // fail-soft rule the highlights query follows. A child parser never
-        // gets one, which is what bounds recursion at one level regardless of
-        // what a future grammar's injections.scm claims.
-        if allowsInjections, let file = language.injectionQueryFile,
+        // fail-soft rule the highlights query follows. The depth test is what
+        // bounds recursion regardless of what a grammar's injections.scm
+        // claims: at the deepest level no injections query is loaded at all,
+        // so a child cannot inject further.
+        if depth < Self.maximumInjectionDepth, let file = language.injectionQueryFile,
            let text = Self.queryText(for: [file], root: queriesRoot),
            let compiled = Self.compile(text, language: tsLanguage) {
             self.injections = InjectionQuery(query: compiled)
@@ -177,7 +192,11 @@ public final class SyntaxParser {
     func noteEdit(_ edit: TextEdit, start: TSPoint, oldEnd: TSPoint, newEnd: TSPoint) {
         guard isTopLevel, let tree else { return }
         guard edit.start >= 0, edit.start <= edit.oldEnd, edit.start <= edit.newEnd,
-              edit.oldEnd * 2 <= treeByteCount
+              edit.oldEnd * 2 <= treeByteCount,
+              // The only bound `newEnd` has is tree-sitter's 32-bit offsets;
+              // past it, the UInt32 conversion below would trap rather than
+              // start over, which is the wrong answer to a nonsense edit.
+              edit.newEnd <= Int(UInt32.max) / 2
         else {
             // An edit that cannot describe this text means the caller and the
             // tree have already disagreed; better to start over than to guess.
@@ -216,6 +235,7 @@ public final class SyntaxParser {
         tree = nil
         treeByteCount = 0
         editsSinceParse = false
+        lastCallWasCut = false
     }
 
     // MARK: - Tokenising
@@ -307,6 +327,14 @@ public final class SyntaxParser {
         // and TextKit 2 all speak.
         let units = Array(source.utf16)
         let text = source as NSString
+        // tree-sitter's offsets are 32-bit. The app's size caps keep documents
+        // four orders of magnitude away from this, but SyntaxParser is public
+        // and imposes no cap of its own; past the limit the byte count below
+        // would trap in its UInt32 conversion.
+        guard units.count <= Int(UInt32.max) / 2 else {
+            invalidate()
+            return .empty
+        }
 
         return units.withUnsafeBufferPointer { buffer -> SyntaxTokenList? in
             let byteCount = buffer.count * 2
@@ -319,11 +347,23 @@ public final class SyntaxParser {
             // token after the discrepancy on the wrong text.
             if tree != nil, !editsSinceParse || treeByteCount != byteCount { invalidate() }
 
+            // A child parser is shared between regions parsed as a substring
+            // and regions parsed through included ranges -- see `run` -- and
+            // included ranges live on the PARSER, not the call. A substring is
+            // the whole of its own input, so they are cleared here.
+            if !isTopLevel { ts_parser_set_included_ranges(parser, nil, 0) }
+
             guard let newTree = Self.parse(buffer, with: parser, oldTree: tree, deadline: deadline)
             else {
                 if deadline.pointee.exceeded {
                     // The edited old tree is kept: the edits it carries are
-                    // real, and the next keystroke can still reuse it.
+                    // real, and the next keystroke can still reuse it -- once
+                    // it has reported its edit. Reuse is re-earned, not
+                    // carried over: the guard above trusts this flag to mean
+                    // "every change since the tree was built was reported",
+                    // and a cut is a call, so a caller that reports nothing
+                    // before the next one may have changed anything.
+                    editsSinceParse = false
                     return nil
                 }
                 // An empty document has no tree and is not a failure.
@@ -336,23 +376,89 @@ public final class SyntaxParser {
                 tree = newTree
                 treeByteCount = byteCount
                 editsSinceParse = false
-                return tokens(in: newTree, text: text, deadline: deadline)
+                return tokens(
+                    in: newTree, document: buffer, text: text, string: source,
+                    ranges: nil, deadline: deadline
+                )
             } else {
                 defer { ts_tree_delete(newTree) }
-                return tokens(in: newTree, text: text, deadline: deadline)
+                return tokens(
+                    in: newTree, document: buffer, text: text, string: source,
+                    ranges: nil, deadline: deadline
+                )
             }
         }
     }
 
-    private func tokens(
-        in tree: OpaquePointer,
+    /// A child's other entry point: the WHOLE document's buffer, with the
+    /// parser confined to `ranges` through tree-sitter's included ranges.
+    ///
+    /// This is what a COMBINED injection needs. The HTML of a PHP template is
+    /// one document that PHP blocks cut holes in -- an element can open before
+    /// a `<?php` and close after the matching `?>` -- so parsing each fragment
+    /// on its own reports errors that are not in the file. Included ranges let
+    /// tree-sitter lex the fragments as one continuous stream, skipping the
+    /// holes. Measured over 381 WordPress templates: 521 ERROR nodes when the
+    /// fragments are parsed separately, 126 when they are parsed as one.
+    ///
+    /// Offsets need no shifting afterwards, because the child read the
+    /// document's own buffer: its node offsets ARE document offsets.
+    ///
+    /// `ranges` is sorted, disjoint and non-empty, in UTF-16 units.
+    private func childTokens(
+        document: UnsafeBufferPointer<UInt16>,
         text: NSString,
+        string: String,
+        ranges: [NSRange],
         deadline: UnsafeMutablePointer<Deadline>
     ) -> SyntaxTokenList? {
-        guard var tokens = captures(in: tree, text: text, deadline: deadline) else {
+        var tsRanges = Self.tsRanges(ranges, in: document)
+        guard ts_parser_set_included_ranges(parser, &tsRanges, UInt32(tsRanges.count))
+        else { return nil }
+        guard let newTree = Self.parse(document, with: parser, oldTree: nil, deadline: deadline)
+        else { return nil }
+        defer { ts_tree_delete(newTree) }
+        return tokens(
+            in: newTree, document: document, text: text, string: string,
+            ranges: ranges, deadline: deadline
+        )
+    }
+
+    /// `text` and `string` are the same characters twice: predicates compare
+    /// through the NSString and run regexes through the String, and bridging
+    /// between the two on every evaluation was measurable, so both travel.
+    private func tokens(
+        in tree: OpaquePointer,
+        document: UnsafeBufferPointer<UInt16>,
+        text: NSString,
+        string: String,
+        ranges: [NSRange]?,
+        deadline: UnsafeMutablePointer<Deadline>
+    ) -> SyntaxTokenList? {
+        guard var tokens = captures(in: tree, text: text, string: string, deadline: deadline) else {
             return nil
         }
-        tokens += injectedTokens(in: tree, text: text, deadline: deadline)
+        // A node of the injected language can span one of the holes -- an
+        // attribute value with a `<?php echo $x; ?>` in the middle of it is one
+        // HTML node -- and outermost-wins would let that single token swallow
+        // every PHP token inside the hole. So a child's tokens are cut back to
+        // its own ranges. With one range this cannot fire: tree-sitter never
+        // reports a node outside the ranges it was given.
+        if let ranges { tokens = Self.clip(tokens, to: ranges) }
+        tokens += injectedTokens(
+            in: tree, document: document, text: text, string: string,
+            parentRanges: ranges, deadline: deadline
+        )
+        // A cut ANYWHERE is a cut of the whole call. A child that ran out of
+        // time has returned nothing for its region, and nothing here can tell
+        // that from a region with nothing to colour -- so without this the
+        // outer tokens were reported as a success, `lastCallWasCut` stayed
+        // false, the backoff reset, and a hostile `<script>` burned the whole
+        // budget on every keystroke: the exact case CutBackoff exists for.
+        // Keeping the outer tokens would be no better. During the keystrokes
+        // the backoff skips they would be painted, stale, over text that has
+        // moved; plain is what the README promises for a cut document.
+        if deadline.pointee.exceeded { return nil }
         return SyntaxTokenList(tokens)
     }
 
@@ -378,6 +484,7 @@ public final class SyntaxParser {
     private func captures(
         in tree: OpaquePointer,
         text: NSString,
+        string: String,
         deadline: UnsafeMutablePointer<Deadline>
     ) -> [SyntaxToken]? {
         var tokens: [SyntaxToken] = []
@@ -399,7 +506,7 @@ public final class SyntaxParser {
                     start: match.captures,
                     count: Int(match.capture_count)
                 )
-                guard passes(match: match, captures: captures, text: text, tests: tests)
+                guard Self.passes(match: match, captures: captures, text: text, string: string, tests: tests)
                 else { continue }
 
                 for capture in captures {
@@ -433,18 +540,31 @@ public final class SyntaxParser {
         /// are dropped rather than emitted unfiltered.
         case never
         case match(capture: UInt32, regex: NSRegularExpression, negated: Bool)
-        case equals(capture: UInt32, values: [NSString], negated: Bool)
-        case anyOf(capture: UInt32, values: [NSString], negated: Bool)
+        case equals(capture: UInt32, values: [Literal], negated: Bool)
+        case anyOf(capture: UInt32, values: [Literal], negated: Bool)
+    }
+
+    /// A string argument of a predicate, with its UTF-16 length worked out
+    /// once: a length mismatch rejects a capture before any characters are
+    /// compared, and that is the outcome for nearly every capture tested.
+    private struct Literal {
+        let string: String
+        let utf16Count: Int
+
+        init(_ string: String) {
+            self.string = string
+            self.utf16Count = string.utf16.count
+        }
     }
 
     /// Compares a range of the document against a value without copying it out.
     private static func text(
         _ text: NSString,
         _ range: NSRange,
-        equals value: NSString
+        equals value: Literal
     ) -> Bool {
-        range.length == value.length
-            && text.compare(value as String, options: [.literal], range: range) == .orderedSame
+        range.length == value.utf16Count
+            && text.compare(value.string, options: [.literal], range: range) == .orderedSame
     }
 
     /// Evaluated against the document rather than against an extracted
@@ -454,10 +574,11 @@ public final class SyntaxParser {
     /// fires on a large fraction of a file (`@constructor` is `^[A-Z]` on every
     /// identifier), so a substring per test would have given back much of what
     /// the C loop just won.
-    private func passes(
+    private static func passes(
         match: TSQueryMatch,
         captures: UnsafeBufferPointer<TSQueryCapture>,
         text: NSString,
+        string: String,
         tests: [[CaptureTest]]
     ) -> Bool {
         let pattern = Int(match.pattern_index)
@@ -473,9 +594,13 @@ public final class SyntaxParser {
             case let .match(index, regex, negated):
                 for capture in captures where capture.index == index {
                     guard let range = Self.range(of: capture.node) else { return false }
-                    let matched = regex.firstMatch(
-                        in: text as String, options: [], range: range
-                    ) != nil
+                    // rangeOfFirstMatch, not firstMatch: the latter allocates
+                    // an NSTextCheckingResult per evaluation whose only use
+                    // here was to be compared with nil, and this runs on every
+                    // identifier in a JavaScript, Python or PHP file.
+                    let matched = regex.rangeOfFirstMatch(
+                        in: string, options: [], range: range
+                    ).location != NSNotFound
                     if matched == negated { return false }
                 }
 
@@ -524,6 +649,10 @@ public final class SyntaxParser {
         /// highlights table -- and why an `#eq?`-gated injection was firing
         /// unconditionally before it existed.
         let tests: [[CaptureTest]]
+        /// `(#set! injection.combined)`, by pattern index: every match of the
+        /// pattern belongs to ONE injected document rather than being a region
+        /// of its own.
+        let combined: [Bool]
 
         init(query: OpaquePointer) {
             self.query = query
@@ -533,13 +662,16 @@ public final class SyntaxParser {
             self.tests = SyntaxParser.tests(in: query)
 
             var languages: [SyntaxLanguage?] = []
+            var combined: [Bool] = []
             for pattern in 0..<Int(ts_query_pattern_count(query)) {
                 let settings = SyntaxParser.directives(in: query, pattern: pattern)
                 languages.append(
                     settings["injection.language"].flatMap(SyntaxLanguage.init(injectionName:))
                 )
+                combined.append(settings["injection.combined"] != nil)
             }
             self.languages = languages
+            self.combined = combined
         }
 
         func dispose() {
@@ -548,22 +680,39 @@ public final class SyntaxParser {
         }
     }
 
+    /// One combined injection: every content node a pattern captured for one
+    /// language. Ordered so the work is done in a fixed order.
+    private struct CombinedKey: Hashable, Comparable {
+        let pattern: Int
+        let language: SyntaxLanguage
+
+        static func < (lhs: CombinedKey, rhs: CombinedKey) -> Bool {
+            (lhs.pattern, lhs.language.rawValue) < (rhs.pattern, rhs.language.rawValue)
+        }
+    }
+
     /// Tokens for the bodies of embedded languages -- `<script>` and `<style>`
-    /// -- expressed in the OUTER document's offsets.
+    /// inside HTML, and the HTML around the PHP of a template -- expressed in
+    /// the OUTER document's offsets.
     ///
-    /// The region is sliced with `NSString.substring(with:)` rather than
-    /// `Range(NSRange, in: String)`, which returns nil when a range boundary
-    /// splits a surrogate pair. That cannot actually happen here, since a
-    /// `raw_text` boundary always sits on `>` or `<`, but the NSString path is
-    /// the one that stays correct if it ever did, and this project has been
-    /// bitten by that conversion twice already.
+    /// Two shapes of injection, and the query says which:
     ///
-    /// Shifting by the region's start is the whole of the offset maths: the
-    /// child returns UTF-16 offsets into the substring, and the substring
-    /// begins at the region's location in the document.
+    /// - ordinary: every match is a region of its own, parsed on its own.
+    ///   HTML's `<script>` and `<style>` are these.
+    /// - combined (`(#set! injection.combined)`): every match of the pattern
+    ///   belongs to ONE document, parsed once over all of their ranges
+    ///   together. PHP's `(text)` is this, and it has to be -- the HTML of a
+    ///   template is a single document with PHP-shaped holes cut in it, not a
+    ///   series of unrelated fragments.
+    ///
+    /// Either way a region is cut to this parser's own ranges, so a `<script>`
+    /// inside PHP-split HTML excludes the PHP within it.
     private func injectedTokens(
         in tree: OpaquePointer,
+        document: UnsafeBufferPointer<UInt16>,
         text: NSString,
+        string: String,
+        parentRanges: [NSRange]?,
         deadline: UnsafeMutablePointer<Deadline>
     ) -> [SyntaxToken] {
         guard let injections, let contentCapture = injections.contentCapture,
@@ -571,6 +720,13 @@ public final class SyntaxParser {
         else { return [] }
 
         var injected: [SyntaxToken] = []
+        /// Content nodes of each combined injection, gathered until the walk
+        /// ends because a combined injection is only whole once every match is
+        /// in. Keyed by pattern AND language: a pattern that names its language
+        /// through an `@injection.language` capture can name a different one
+        /// per match, and keying by pattern alone would parse every match as
+        /// whatever the first one said.
+        var combined: [CombinedKey: [TSNode]] = [:]
         let root = ts_tree_root_node(tree)
         // The injections query itself is a handful of matches and is run
         // without a callback; the deadline is enforced inside each child.
@@ -585,10 +741,11 @@ public final class SyntaxParser {
             // Injection patterns can carry predicates like any others, and the
             // unsafe direction here is the permissive one: a region that should
             // not be injected would be parsed and coloured as another language.
-            guard passes(
+            guard Self.passes(
                 match: match,
                 captures: captures,
                 text: text,
+                string: string,
                 tests: injections.tests
             ) else { continue }
 
@@ -599,6 +756,9 @@ public final class SyntaxParser {
                 injections: injections
             ) else { continue }
 
+            let pattern = Int(match.pattern_index)
+            let isCombined = pattern < injections.combined.count && injections.combined[pattern]
+
             for capture in captures where capture.index == contentCapture {
                 // `<script></script>` and `<script src="...">` both produce an
                 // injection, of length zero. Skipped BEFORE the child parser is
@@ -606,33 +766,222 @@ public final class SyntaxParser {
                 // query, which is the cost this guard exists to avoid.
                 guard let range = Self.range(of: capture.node),
                       range.length > 0,
-                      NSMaxRange(range) <= text.length,
+                      NSMaxRange(range) <= text.length
+                else { continue }
+
+                if isCombined {
+                    combined[CombinedKey(pattern: pattern, language: language), default: []]
+                        .append(capture.node)
+                    continue
+                }
+
+                let ranges = Self.includedRanges(of: [capture.node], within: parentRanges)
+                guard !ranges.isEmpty, !deadline.pointee.exceeded,
                       let child = childParser(for: language)
                 else { continue }
 
-                // A child that runs out of time leaves its region plain and
-                // the rest of the document coloured. Each parser's own result
-                // is all-or-nothing; the composite may be partial only at the
-                // granularity of a whole injected region.
-                guard let childTokens = child.tokens(
-                    for: text.substring(with: range),
+                // A child that runs out of time leaves the deadline marked
+                // exceeded, and `tokens(in:)` then discards the whole call --
+                // see the comment there for why a partial result is worse
+                // than none.
+                injected += Self.run(
+                    child, ranges: ranges, document: document, text: text, string: string,
                     deadline: deadline
-                ) else { continue }
-
-                for token in childTokens.tokens {
-                    injected.append(
-                        SyntaxToken(
-                            range: NSRange(
-                                location: token.range.location + range.location,
-                                length: token.range.length
-                            ),
-                            kind: token.kind
-                        )
-                    )
-                }
+                )
             }
         }
+
+        // Sorted, so the order of the work does not depend on the order the
+        // query walk happened to report matches in.
+        for key in combined.keys.sorted() {
+            guard let nodes = combined[key], !deadline.pointee.exceeded else { continue }
+            let ranges = Self.includedRanges(of: nodes, within: parentRanges)
+            guard !ranges.isEmpty, let child = childParser(for: key.language) else { continue }
+            injected += Self.run(
+                child, ranges: ranges, document: document, text: text, string: string,
+                deadline: deadline
+            )
+        }
         return injected
+    }
+
+    /// One region, one child.
+    ///
+    /// A region that is a single contiguous range is parsed as a SUBSTRING and
+    /// shifted -- the path `<script>` and `<style>` have always taken. It is
+    /// kept rather than folded into the included-ranges path because the two
+    /// are not equivalent on broken text: tree-sitter prices its error recovery
+    /// partly by byte position, so an unterminated script can recover
+    /// differently when read as part of a larger buffer. Only a region the host
+    /// language splits into several ranges needs included ranges.
+    private static func run(
+        _ child: SyntaxParser,
+        ranges: [NSRange],
+        document: UnsafeBufferPointer<UInt16>,
+        text: NSString,
+        string: String,
+        deadline: UnsafeMutablePointer<Deadline>
+    ) -> [SyntaxToken] {
+        if ranges.count == 1 {
+            let range = ranges[0]
+            guard let childTokens = child.tokens(
+                for: text.substring(with: range),
+                deadline: deadline
+            ) else { return [] }
+            return childTokens.tokens.map {
+                SyntaxToken(
+                    range: NSRange(
+                        location: $0.range.location + range.location,
+                        length: $0.range.length
+                    ),
+                    kind: $0.kind
+                )
+            }
+        }
+        return child.childTokens(
+            document: document, text: text, string: string, ranges: ranges, deadline: deadline
+        )?.tokens ?? []
+    }
+
+    /// UTF-16 ranges as tree-sitter's byte ranges, with REAL row and column
+    /// points.
+    ///
+    /// Points are zero everywhere else here -- see `noteEdit` -- and that is
+    /// safe because nothing in this pipeline reads a node's point. Included
+    /// ranges are the exception, and not because of what we read: tree-sitter
+    /// seeds the lexer's position from the range itself, so zero points tell it
+    /// every fragment begins at row 0 column 0, and a grammar that asks where
+    /// it is on the line is then answered wrongly. Measured on a fuzz walk over
+    /// WordPress templates: zero points moved 108 tokens and 12 node structures
+    /// that real points left alone. The scan costs 1.27 ms across 3.1 MB.
+    ///
+    /// Column is in BYTES, which is how tree-sitter counts it, so a UTF-16
+    /// offset is doubled. Checked against the host grammar's own node points
+    /// over three corpora: no disagreements.
+    private static func tsRanges(
+        _ ranges: [NSRange],
+        in document: UnsafeBufferPointer<UInt16>
+    ) -> [TSRange] {
+        var out: [TSRange] = []
+        out.reserveCapacity(ranges.count)
+        // One forward scan serves the whole list, because the ranges are
+        // sorted: the line counter never has to go back.
+        var row: UInt32 = 0
+        var lineStart = 0
+        var scanned = 0
+        func point(_ offset: Int) -> TSPoint {
+            while scanned < offset {
+                if document[scanned] == 0x000A {
+                    row += 1
+                    lineStart = scanned + 1
+                }
+                scanned += 1
+            }
+            return TSPoint(row: row, column: UInt32((offset - lineStart) * 2))
+        }
+        for range in ranges {
+            let start = point(range.location)
+            let end = point(NSMaxRange(range))
+            out.append(TSRange(
+                start_point: start,
+                end_point: end,
+                start_byte: UInt32(range.location * 2),
+                end_byte: UInt32(NSMaxRange(range) * 2)
+            ))
+        }
+        return out
+    }
+
+    /// The ranges an injection covers: its content nodes, merged, and cut to
+    /// the host parser's own ranges (nil meaning the whole document). Sorted
+    /// and disjoint, which is what `ts_parser_set_included_ranges` requires.
+    ///
+    /// Upstream's tree-sitter-highlight also subtracts each content node's
+    /// CHILDREN unless the pattern sets `injection.include-children`. Neither
+    /// vendored query captures a node that has any -- HTML's `raw_text` and
+    /// PHP's `text` are both leaves -- so that step would do nothing here, and
+    /// it is left out rather than written blind against no test.
+    private static func includedRanges(
+        of nodes: [TSNode],
+        within parent: [NSRange]?
+    ) -> [NSRange] {
+        var pieces: [NSRange] = []
+        pieces.reserveCapacity(nodes.count)
+        for node in nodes {
+            guard let range = range(of: node), range.length > 0 else { continue }
+            pieces.append(range)
+        }
+        pieces.sort { $0.location < $1.location }
+
+        var merged: [NSRange] = []
+        merged.reserveCapacity(pieces.count)
+        for piece in pieces {
+            if let last = merged.last, piece.location <= NSMaxRange(last) {
+                merged[merged.count - 1] = NSUnionRange(last, piece)
+            } else {
+                merged.append(piece)
+            }
+        }
+        guard let parent else { return merged }
+
+        // Both lists are sorted, so this is one walk rather than a search per
+        // piece.
+        var result: [NSRange] = []
+        var index = 0
+        for piece in merged {
+            while index < parent.count, NSMaxRange(parent[index]) <= piece.location {
+                index += 1
+            }
+            var scan = index
+            while scan < parent.count, parent[scan].location < NSMaxRange(piece) {
+                let lower = max(piece.location, parent[scan].location)
+                let upper = min(NSMaxRange(piece), NSMaxRange(parent[scan]))
+                if upper > lower {
+                    result.append(NSRange(location: lower, length: upper - lower))
+                }
+                scan += 1
+            }
+        }
+        return result
+    }
+
+    /// Cuts tokens back to `ranges` (sorted, disjoint, and two or more of them:
+    /// `run` parses a single range as a substring and never comes here). A
+    /// token wholly inside one range passes through untouched; one that spans
+    /// a hole is split, so that the host language's tokens inside that hole
+    /// are not swallowed by the outermost-wins merge.
+    private static func clip(_ tokens: [SyntaxToken], to ranges: [NSRange]) -> [SyntaxToken] {
+        var out: [SyntaxToken] = []
+        out.reserveCapacity(tokens.count)
+        for token in tokens {
+            let start = token.range.location
+            let end = NSMaxRange(token.range)
+            // The overwhelmingly common case is a token inside one range, so
+            // it is found by binary search and nothing is allocated.
+            var low = 0
+            var high = ranges.count
+            while low < high {
+                let middle = (low + high) / 2
+                if NSMaxRange(ranges[middle]) <= start { low = middle + 1 } else { high = middle }
+            }
+            if low < ranges.count, ranges[low].location <= start, end <= NSMaxRange(ranges[low]) {
+                out.append(token)
+                continue
+            }
+            var index = low
+            while index < ranges.count, ranges[index].location < end {
+                let lower = max(start, ranges[index].location)
+                let upper = min(end, NSMaxRange(ranges[index]))
+                if upper > lower {
+                    out.append(SyntaxToken(
+                        range: NSRange(location: lower, length: upper - lower),
+                        kind: token.kind
+                    ))
+                }
+                index += 1
+            }
+        }
+        return out
     }
 
     /// An `@injection.language` capture names the language in the document
@@ -664,7 +1013,7 @@ public final class SyntaxParser {
         guard let child = SyntaxParser(
             language: language,
             queriesRoot: queriesRoot,
-            allowsInjections: false
+            depth: depth + 1
         ) else { return nil }
         children[language] = child
         return child
@@ -672,7 +1021,8 @@ public final class SyntaxParser {
 
     // MARK: - Setting up
 
-    private static func grammar(for language: SyntaxLanguage) -> OpaquePointer? {
+    /// Internal so a test can pin each grammar's ABI version.
+    static func grammar(for language: SyntaxLanguage) -> OpaquePointer? {
         switch language {
         case .plain: nil
         case .html: tree_sitter_html()
@@ -681,6 +1031,9 @@ public final class SyntaxParser {
         case .typescript: tree_sitter_typescript()
         case .python: tree_sitter_python()
         case .shell: tree_sitter_bash()
+        case .java: tree_sitter_java()
+        case .php: tree_sitter_php()
+        case .sql: tree_sitter_sql()
         }
     }
 
@@ -866,9 +1219,9 @@ public final class SyntaxParser {
                 // Every remaining string argument, not just the first:
                 // `#any-of? @x "a" "b"` means both, and reading only "a" would
                 // quietly narrow the test.
-                let values: [NSString] = steps.dropFirst(2).compactMap { step in
+                let values: [Literal] = steps.dropFirst(2).compactMap { step in
                     guard step.type == TSQueryPredicateStepTypeString else { return nil }
-                    return stringValue(step.value_id, in: query).map { $0 as NSString }
+                    return stringValue(step.value_id, in: query).map(Literal.init)
                 }
                 let negated = name.hasPrefix("not-")
 
@@ -880,7 +1233,8 @@ public final class SyntaxParser {
                     // filter, so an unevaluable one drops its captures instead
                     // of emitting them unfiltered -- the language keeps
                     // highlighting everything else.
-                    guard let regex = try? NSRegularExpression(pattern: pattern as String)
+                    guard let translated = Self.icuPattern(from: pattern.string),
+                          let regex = try? NSRegularExpression(pattern: translated)
                     else { return .never }
                     return .match(capture: capture, regex: regex, negated: negated)
 
@@ -903,20 +1257,98 @@ public final class SyntaxParser {
         }
     }
 
+    /// A `#match?` pattern in ICU's dialect, translating Lua's character
+    /// classes on the way if it has any.
+    ///
+    /// `#match?` has no single dialect. tree-sitter's own tooling uses Rust
+    /// regex, this app uses ICU through NSRegularExpression, and **Neovim uses
+    /// Lua patterns**, where a character class is written `%d` rather than
+    /// `\d`. Every query vendored here came from a grammar that publishes for
+    /// tree-sitter's tooling -- except SQL's, which is written for Neovim, and
+    /// whose two predicates are `^[-+]?%d+$` and `^[-+]?%d*%.%d*$`.
+    ///
+    /// Left untranslated those are valid ICU patterns that mean something else
+    /// entirely: `%d` matches a literal `%` followed by `d`, so neither ever
+    /// matches a number. That is not a missing colour but a WRONG one --
+    /// `(literal)` is captured as `@string` too, so every number in a SQL file
+    /// would be dropped from `@number` and left red as a string.
+    ///
+    /// The translation is deliberately narrow. It does nothing at all unless
+    /// the pattern contains a `%`, and no `#match?` pattern in any other
+    /// vendored query does (the `"%"` in JavaScript's and Python's queries is
+    /// the modulo OPERATOR, a pattern literal, which never reaches here). Lua's
+    /// `%` before a non-alphanumeric is its escape, which becomes ICU's
+    /// backslash; before a class letter it becomes the class; and `%%` is a
+    /// literal per cent.
+    ///
+    /// Returns nil for a class letter it does not know (`%c`, `%g`), and the
+    /// caller then treats the test as unsatisfiable. Passing it through would
+    /// hand ICU a pattern that means "a literal per cent, then the letter" --
+    /// silently the wrong test, which is the exact failure this function
+    /// exists to prevent -- and dropping the captures is how an uncompilable
+    /// pattern is already handled. Internal rather than private so the table
+    /// of classes can be tested directly.
+    static func icuPattern(from pattern: String) -> String? {
+        guard pattern.contains("%") else { return pattern }
+        var out = ""
+        let characters = Array(pattern)
+        var index = 0
+        while index < characters.count {
+            let character = characters[index]
+            guard character == "%", index + 1 < characters.count else {
+                out.append(character)
+                index += 1
+                continue
+            }
+            let next = characters[index + 1]
+            switch next {
+            case "d": out += "[0-9]"
+            case "D": out += "[^0-9]"
+            case "a": out += "[A-Za-z]"
+            case "A": out += "[^A-Za-z]"
+            case "l": out += "[a-z]"
+            case "u": out += "[A-Z]"
+            case "w": out += "[A-Za-z0-9]"
+            case "W": out += "[^A-Za-z0-9]"
+            case "x": out += "[0-9A-Fa-f]"
+            case "s": out += "[ \\t\\n\\r\\u{0B}\\u{0C}]"
+            case "S": out += "[^ \\t\\n\\r\\u{0B}\\u{0C}]"
+            case "p": out += "[\\p{P}\\p{S}]"
+            case "%": out += "%"
+            default:
+                // Lua escapes a magic character with `%`; ICU with a
+                // backslash. A letter or digit is a class this table does
+                // not have, and there is no honest translation for it.
+                if next.isLetter || next.isNumber { return nil }
+                out.append("\\")
+                out.append(next)
+            }
+            index += 2
+        }
+        return out
+    }
+
     /// `#set!` directives for a pattern, as key/value pairs.
+    ///
+    /// A directive may carry no value at all -- `(#set! injection.combined)` is
+    /// a flag, and PHP's injections query uses exactly that form -- so a
+    /// two-step group is read as a key with an empty value. Callers testing a
+    /// flag ask whether the key is present; callers reading a name, such as
+    /// `injection.language`, get "" and find no language of that name.
     private static func directives(
         in query: OpaquePointer,
         pattern: Int
     ) -> [String: String] {
         var settings: [String: String] = [:]
         for steps in predicateGroups(in: query, pattern: pattern) {
-            guard steps.count >= 3,
+            guard steps.count >= 2,
                   steps.allSatisfy({ $0.type == TSQueryPredicateStepTypeString }),
                   stringValue(steps[0].value_id, in: query) == "set!",
-                  let key = stringValue(steps[1].value_id, in: query),
-                  let value = stringValue(steps[2].value_id, in: query)
+                  let key = stringValue(steps[1].value_id, in: query)
             else { continue }
-            settings[key] = value
+            settings[key] = steps.count >= 3
+                ? (stringValue(steps[2].value_id, in: query) ?? "")
+                : ""
         }
         return settings
     }

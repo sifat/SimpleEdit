@@ -124,6 +124,94 @@ public enum SyntaxTokenKind: String, Sendable, CaseIterable {
         .shell: [
             "embedded": nil,
         ],
+        // Java differs from JavaScript in three ways, and each is a place the
+        // shared table would colour Java wrongly.
+        //
+        // - `function.method` is shared as `.property`, because in JavaScript
+        //   it always coincides with a `@property` capture. Java's query has no
+        //   `@property` at all: a method declaration or call is captured ONLY
+        //   as `function.method`, so under the shared row every method name
+        //   in a Java file would be blue rather than a function.
+        // - `type` is a type name, as in TypeScript and Python; the shared row
+        //   is CSS's unit.
+        // - `variable.builtin` is only `this`, and `function.builtin` only
+        //   `super`. Both are keywords in Java, and neither node is captured by
+        //   anything else, so colouring them as keywords cannot create a tie.
+        //   Left to the shared table, `this` would be plain (it inherits
+        //   `variable`) and `super` indigo.
+        //
+        // `variable` is the blanket `(identifier)` capture, unmapped as
+        // everywhere. Unlike JavaScript and Python, Java class names ARE
+        // coloured: the grammar captures them as `@type` from their position,
+        // not from a capitalisation guess.
+        .java: [
+            "variable": nil,
+            "variable.builtin": .keyword,
+            "function.builtin": .keyword,
+            "function.method": .function,
+            "type": .type,
+        ],
+        // PHP's table is Java's plus three names Java's query never emits, and
+        // one that means something different here.
+        //
+        // - `variable` is NOT the blanket identifier capture it is everywhere
+        //   else: PHP variables carry a `$`, so the grammar captures exactly
+        //   `$foo` and nothing else. Measured over 45,000 WordPress and Drupal
+        //   files, it collides with only one other capture -- `property`, over
+        //   the identical range, on `$obj->$name` -- and both map to the same
+        //   kind, so the duplicate collapses instead of being decided by a
+        //   tie-break. Leaving it unmapped would instead leave every variable
+        //   in a PHP file uncoloured, which is most of the file.
+        // - `module` is a namespace name and `module.builtin` the `namespace`
+        //   of a relative name. A namespace reads as a type here; the keyword
+        //   reads as a keyword.
+        // - `constructor` is `__construct` and the class name in `new Foo`.
+        //   Both are type-ish, and `type` is what the same range usually
+        //   carries anyway, so agreeing with it avoids a tie-break.
+        //
+        // `type.builtin` is `static`, `self` and the primitive types; it has no
+        // row because the dotted walk reaches `type` and that is the right
+        // answer. It is gated by `#any-of?`, which this app evaluates -- were
+        // it not, 41,448 ordinary class names in the Drupal corpus would be
+        // captured as builtins.
+        .php: [
+            "variable": .property,
+            "variable.builtin": .keyword,
+            "function.builtin": .keyword,
+            "function.method": .function,
+            "type": .type,
+            "constructor": .type,
+            "module": .type,
+            "module.builtin": .keyword,
+        ],
+        // SQL's query is the only vendored one written for Neovim rather than
+        // for tree-sitter's own tooling, and it shows in the capture names:
+        // half of them are Neovim's vocabulary, which no other grammar here
+        // uses. Each is mapped to the nearest thing this app already has.
+        //
+        // - `conditional` (CASE/WHEN/THEN/ELSE), `storageclass` (TEMPORARY,
+        //   MATERIALIZED) and `type.qualifier` (UNIQUE, CASCADE, CHECK) are all
+        //   keywords by any reading; only Neovim's themes separate them.
+        // - `field` is a column name and `parameter` a `$1` placeholder; both
+        //   read as the identifiers they are, which is `property` here.
+        // - `boolean` and `float` are literals, like `number`.
+        // - `type` must be overridden because the shared row means CSS's unit:
+        //   in SQL it is a table or object name.
+        // - `spell` is unmapped ON PURPOSE. It is not a colour at all -- it
+        //   marks regions for Neovim's spell checker, and it is captured over
+        //   the same comments as `@comment`. Colouring it would put a second
+        //   kind on an identical range and leave the winner to a tie-break.
+        .sql: [
+            "boolean": .constant,
+            "conditional": .keyword,
+            "field": .property,
+            "float": .constant,
+            "parameter": .property,
+            "spell": nil,
+            "storageclass": .keyword,
+            "type": .type,
+            "type.qualifier": .keyword,
+        ],
     ]
 
     /// The union of every vendored query's capture names. Adding a language

@@ -38,6 +38,24 @@ final class LineNumberRulerView: NSRulerView {
     private let font = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
     private let horizontalPadding: CGFloat = 6
 
+    /// The drawn width of an n-digit number, measured once per digit count.
+    ///
+    /// The font is monospaced-digit, so every n-digit label is the same width
+    /// and one measurement per n is exact. Measuring each label as it was drawn
+    /// was a Core Text layout per visible line per frame -- the draw pass runs
+    /// on every scroll event -- and the gutter-width check did the same again
+    /// on every draw. At most ten entries; never invalidated, since the font
+    /// is fixed for the life of the view.
+    private var labelWidthByDigitCount: [Int: CGFloat] = [:]
+
+    private func labelWidth(digits: Int) -> CGFloat {
+        if let width = labelWidthByDigitCount[digits] { return width }
+        let sample = String(repeating: "8", count: digits) as NSString
+        let width = sample.size(withAttributes: [.font: font]).width
+        labelWidthByDigitCount[digits] = width
+        return width
+    }
+
     init(textView: NSTextView, scrollView: NSScrollView) {
         self.textView = textView
         super.init(scrollView: scrollView, orientation: .verticalRuler)
@@ -222,9 +240,9 @@ final class LineNumberRulerView: NSRulerView {
         let y = convert(inTextView, from: textView).y
 
         let label = "\(lineNumber)" as NSString
-        let size = label.size(withAttributes: attributes)
+        let width = labelWidth(digits: label.length)
         label.draw(
-            at: NSPoint(x: bounds.maxX - size.width - horizontalPadding, y: y),
+            at: NSPoint(x: bounds.maxX - width - horizontalPadding, y: y),
             withAttributes: attributes
         )
     }
@@ -259,7 +277,6 @@ final class LineNumberRulerView: NSRulerView {
 
     private func thickness(forHighestLine line: Int) -> CGFloat {
         let digits = max(2, String(line).count)
-        let sample = String(repeating: "8", count: digits) as NSString
-        return sample.size(withAttributes: [.font: font]).width + horizontalPadding * 2
+        return labelWidth(digits: digits) + horizontalPadding * 2
     }
 }

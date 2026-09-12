@@ -9,9 +9,20 @@ set -eu
 
 APP_NAME="SimpleEdit"
 BUNDLE_ID="com.sifat.simpleedit"
-DEPLOY_TARGET="14.0"
 ROOT="$(cd "$(dirname "$0")" && pwd)"
 APP="$ROOT/build/$APP_NAME.app"
+PLIST="$ROOT/Resources/Info.plist"
+
+# The deployment target is stated once, in Info.plist, and read from there. It
+# used to be written here as well, and Package.swift states it a third time; a
+# mismatch between this script and the plist gave a binary whose
+# LC_BUILD_VERSION disagreed with LSMinimumSystemVersion, with no error.
+# Package.swift cannot read a plist, so it is checked against it instead.
+DEPLOY_TARGET="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$PLIST")"
+grep -q "\.macOS(\.v${DEPLOY_TARGET%%.*})" "$ROOT/Package.swift" || {
+    echo "Package.swift's platform does not match Info.plist's LSMinimumSystemVersion ($DEPLOY_TARGET)" >&2
+    exit 1
+}
 
 UNIVERSAL=0
 MAKE_ZIP=0
@@ -22,6 +33,22 @@ for arg in "$@"; do
         *) echo "unknown option: $arg" >&2; exit 2 ;;
     esac
 done
+
+# A zip is a release artefact, and a release is a tag: refuse to package a
+# commit whose version does not match a tag on it. This is the check that
+# would have caught three languages shipping on a build number that had
+# already gone out as v1.3. Checked before the slow part, and before the
+# release flow in the README is trusted from memory. ALLOW_UNTAGGED_ZIP=1 is
+# for sharing a build that is not a release.
+if [ "$MAKE_ZIP" -eq 1 ] && [ "${ALLOW_UNTAGGED_ZIP:-0}" != "1" ]; then
+    version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PLIST")"
+    tag="$(git -C "$ROOT" describe --tags --exact-match HEAD 2>/dev/null || true)"
+    if [ "$tag" != "v$version" ]; then
+        echo "refusing --zip: Info.plist says $version but HEAD is tagged '${tag:-nothing}'" >&2
+        echo "tag the release commit v$version first, or set ALLOW_UNTAGGED_ZIP=1 for a non-release build" >&2
+        exit 1
+    fi
+fi
 
 cd "$ROOT"
 STAGE="$ROOT/.build/stage"
@@ -50,9 +77,12 @@ build_arch arm64
 echo "==> Assembling $APP"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
+cp "$PLIST" "$APP/Contents/Info.plist"
 # Regenerate with: xcrun swift tools/appicon/make-icon.swift
-[ -f "$ROOT/Resources/AppIcon.icns" ] && cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+# Unconditional. The icon is tracked, and the `[ -f ] && cp` this used to be
+# was exempt from set -e, so a missing icon shipped an app with the generic
+# document icon and a dangling CFBundleIconFile -- no error, no warning.
+cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 
 # Syntax-highlighting queries. Vendored under Resources/Queries rather than read
 # from the grammar's own SwiftPM resource bundle -- see
@@ -61,16 +91,22 @@ cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 # Contents/Resources into _CodeSignature/CodeResources.
 cp -R "$ROOT/Resources/Queries" "$APP/Contents/Resources/"
 # set -eu already fails on a missing source directory; this catches the subtler
-# case where the copy "succeeds" but the file we actually load is not there.
+# case where the copy "succeeds" but a file we actually load is not there.
 # Without it the failure surfaces only at runtime, as a document that silently
-# refuses to highlight.
-for dir in "$ROOT"/Resources/Queries/*/; do
-    language=$(basename "$dir")
-    [ -f "$APP/Contents/Resources/Queries/$language/highlights.scm" ] || {
-        echo "queries missing from bundle: $language" >&2
-        exit 1
-    }
-done
+# refuses to highlight -- and for the injections files not even that: the
+# parser is fail-soft about them, so a lost injections.scm means every <script>
+# body quietly goes plain. So the whole tree is compared, file for file, not
+# just highlights.scm: the injections queries, and the LICENSE files that ship
+# for compliance. Finder droppings are removed rather than compared, since a
+# .DS_Store must not end up inside the signed bundle either.
+find "$APP/Contents/Resources/Queries" -name .DS_Store -delete
+(cd "$ROOT/Resources/Queries" && find . -type f -not -name .DS_Store | sort) > "$STAGE/queries.expected"
+(cd "$APP/Contents/Resources/Queries" && find . -type f | sort) > "$STAGE/queries.bundled"
+cmp -s "$STAGE/queries.expected" "$STAGE/queries.bundled" || {
+    echo "queries in the bundle differ from Resources/Queries:" >&2
+    diff "$STAGE/queries.expected" "$STAGE/queries.bundled" >&2 || true
+    exit 1
+}
 
 if [ "$UNIVERSAL" -eq 1 ]; then
     lipo -create "$STAGE/$APP_NAME.arm64" "$STAGE/$APP_NAME.x86_64" -output "$APP/Contents/MacOS/$APP_NAME"
@@ -87,6 +123,9 @@ fi
 echo "==> Signing (ad-hoc)"
 codesign --force --sign - "$APP/Contents/MacOS/jsonfmt"
 codesign --force --sign - --identifier "$BUNDLE_ID" "$APP"
+# Cheap insurance against a future step landing after the signature: nothing
+# below may touch the bundle, and this is what says so.
+codesign --verify --strict "$APP"
 
 if [ "$MAKE_ZIP" -eq 1 ]; then
     ZIP="$ROOT/build/$APP_NAME.zip"

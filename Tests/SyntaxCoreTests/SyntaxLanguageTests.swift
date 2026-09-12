@@ -27,13 +27,6 @@ struct SyntaxLanguageTests {
         #expect(SyntaxLanguage(fileExtension: "") == nil)
     }
 
-    @Test("Menu tags round-trip for every case")
-    func tagRoundTrip() {
-        for language in SyntaxLanguage.allCases {
-            #expect(SyntaxLanguage(tag: language.tag) == language)
-        }
-    }
-
     @Test("Only real languages have a queries directory")
     func queryDirectories() {
         #expect(SyntaxLanguage.plain.queryDirectoryName == nil)
@@ -44,6 +37,7 @@ struct SyntaxLanguageTests {
         // The case is named for what the user sees; the directory for the
         // grammar that actually parses it.
         #expect(SyntaxLanguage.shell.queryDirectoryName == "bash")
+        #expect(SyntaxLanguage.java.queryDirectoryName == "java")
     }
 
     @Test("JavaScript is detected by extension, module variants included")
@@ -107,6 +101,37 @@ struct SyntaxLanguageTests {
                 #expect(seen.insert(name).inserted, "\(name) is claimed twice")
             }
         }
+    }
+
+    @Test("Java is detected by extension")
+    func javaExtensions() {
+        #expect(SyntaxLanguage(fileExtension: "java") == .java)
+        #expect(SyntaxLanguage(fileExtension: "JAVA") == .java)
+        #expect(SyntaxLanguage(fileName: "Cart.java") == .java)
+        // Compiled classes and archives are not source.
+        #expect(SyntaxLanguage(fileExtension: "class") == nil)
+        #expect(SyntaxLanguage(fileExtension: "jar") == nil)
+    }
+
+    @Test("PHP is detected by extension, templates included")
+    func phpExtensions() {
+        #expect(SyntaxLanguage(fileExtension: "php") == .php)
+        #expect(SyntaxLanguage(fileExtension: "PHP") == .php)
+        #expect(SyntaxLanguage(fileName: "index.php") == .php)
+        #expect(SyntaxLanguage(fileName: "header.phtml") == .php)
+        // Drupal's PHP-by-convention extensions are deliberately not claimed:
+        // `.inc` is not PHP anywhere else. See Resources/Queries/php/SOURCE.md.
+        #expect(SyntaxLanguage(fileExtension: "module") == nil)
+        #expect(SyntaxLanguage(fileExtension: "inc") == nil)
+        #expect(SyntaxLanguage(fileExtension: "theme") == nil)
+    }
+
+    @Test("SQL is detected by extension")
+    func sqlExtensions() {
+        #expect(SyntaxLanguage(fileExtension: "sql") == .sql)
+        #expect(SyntaxLanguage(fileName: "schema.SQL") == .sql)
+        #expect(SyntaxLanguage(fileExtension: "db") == nil)
+        #expect(SyntaxLanguage(fileExtension: "sqlite") == nil)
     }
 
     /// The cap is a measured number, and a language that has a grammar but no

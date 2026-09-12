@@ -38,8 +38,8 @@ tree-sitter does not evaluate `#match?` itself — it hands the predicate to the
 caller. Ignoring them is not "slightly less accurate", it is wrong in the other
 direction: **every** `plain_value` in the file would be captured as `@variable`,
 so `block` in `display: block` would be coloured. `SyntaxParser` therefore
-resolves predicates through `ResolvingQueryMatchSequence`. `CSSParsingTests`
-pins both halves of that behaviour.
+evaluates them itself, in `passes(match:captures:text:string:tests:)`;
+`PredicateTests` and `CSSParsingTests` pin both halves of that behaviour.
 
 ## Keeping it in step with upstream
 

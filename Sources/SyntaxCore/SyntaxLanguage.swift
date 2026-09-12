@@ -13,38 +13,9 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
     case typescript
     case python
     case shell
-
-    public var title: String {
-        switch self {
-        case .plain: "None"
-        case .html: "HTML"
-        case .css: "CSS"
-        case .javascript: "JavaScript"
-        case .typescript: "TypeScript"
-        case .python: "Python"
-        case .shell: "Shell"
-        }
-    }
-
-    /// Menu tag. Only ever used to get from a clicked item back to a case; what
-    /// would be persisted is the raw string, so these carry no compatibility
-    /// weight.
-    public var tag: Int {
-        switch self {
-        case .plain: 0
-        case .html: 1
-        case .css: 2
-        case .javascript: 3
-        case .typescript: 4
-        case .python: 5
-        case .shell: 6
-        }
-    }
-
-    public init?(tag: Int) {
-        guard let match = Self.allCases.first(where: { $0.tag == tag }) else { return nil }
-        self = match
-    }
+    case java
+    case php
+    case sql
 
     /// Lowercased, without the dot.
     public var fileExtensions: [String] {
@@ -65,6 +36,12 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         // zsh-only constructs such as glob qualifiers become error nodes and
         // stay plain -- and `.command` is macOS's double-clickable script.
         case .shell: ["sh", "bash", "zsh", "command"]
+        case .java: ["java"]
+        // `.phtml` is the other conventional extension for a PHP template.
+        // Drupal's `.module`, `.inc`, `.install` and `.theme` are PHP too, but
+        // `.inc` in particular is not PHP anywhere else, so they are left out.
+        case .php: ["php", "phtml"]
+        case .sql: ["sql"]
         }
     }
 
@@ -120,20 +97,9 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
     /// What the cap does bound is the *ordinary* cost paid on every keystroke,
     /// and it is sized so that a typical file at the cap finishes well inside
     /// the budget on hardware slower than this. Measured in release, which is
-    /// what the app ships (debug is 4-5x slower and was what an earlier
-    /// version of this table was measured in):
-    ///
-    ///     JavaScript, library code       0.07 ms/KB
-    ///     CSS, real stylesheets          0.12 ms/KB
-    ///     Shell, real bash scripts       0.10-0.16 ms/KB
-    ///     Python, standard library       0.14-0.20 ms/KB
-    ///     JavaScript, dense component    0.21 ms/KB
-    ///     HTML, markup with inline js    0.21 ms/KB
-    ///     TypeScript, dense              0.22 ms/KB
-    ///     HTML, tag-dense markup         0.26 ms/KB
-    ///     Shell, zsh-specific syntax     0.37 ms/KB
-    ///     Shell, dense bash              0.38 ms/KB
-    ///     Python, dense comprehensions   0.49 ms/KB
+    /// what the app ships; the per-language rates live in ONE place, the
+    /// README's cost table under "What it does not do", so that there is one
+    /// table to keep true.
     ///
     /// Python is the awkward one. Real Python is cheap -- in CSS territory --
     /// and real Python files are often large: argparse.py is 100 KB, typing.py
@@ -142,7 +108,10 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
     /// ordinary code measured in any language, and at 128 KB it would cost
     /// 63 ms here -- close enough to the budget that slower hardware would cut
     /// a legitimate file. So it caps at 64 KB with the others, and large
-    /// standard-library modules stay plain. The comment on
+    /// standard-library modules stay plain. Java makes the same trade for the
+    /// same reason: real Java is the cheapest code measured anywhere, but dense
+    /// Java at 128 KB is 40 ms, so JDK files such as HashMap.java (95 KB) stay
+    /// plain too. The comment on
     /// `SyntaxParser.defaultBudget` is why that trade goes this way round.
     ///
     /// So a 64 KB file of the densest markup is ~17 ms here and perhaps 40 ms
@@ -160,7 +129,34 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         switch self {
         case .plain: 0
         case .css: 128 * 1024
-        case .html, .javascript, .typescript, .python, .shell: 64 * 1024
+        case .html, .javascript, .typescript, .python, .shell, .java: 64 * 1024
+        // PHP pays for two grammars, not one: the file is parsed as PHP, and
+        // the HTML between its `?>` and `<?php` is parsed again as one combined
+        // document. A 64 KB template of dense markup and dense PHP measures
+        // 27 ms for a full parse here, 29 ms per keystroke with the
+        // incremental reuse (median) -- the same bar dense Python (31 ms)
+        // already sets at this cap -- and real templates are far cheaper:
+        // WordPress's 62 KB media-template.php is 12 ms (14 per keystroke).
+        case .php: 64 * 1024
+        // SQL is the one language whose cap is set by BROKEN files rather than
+        // by dense ones, and it is half everything else's because of what a
+        // real .sql file is. Dense hand-written SQL is cheap -- 64 KB of it
+        // measures 14 ms -- but the .sql files that exist on disk are database
+        // dumps, and this grammar cannot parse a mysqldump (see
+        // Resources/Queries/sql/SOURCE.md). Error recovery over one enormous
+        // statement is what costs, and the cost is superlinear in how much of
+        // that statement is in the file. Measured on a real 71 KB dump whose
+        // longest line is 70,081 characters, one INSERT with hundreds of rows:
+        //
+        //     32 KB  7.8 ms   0.25 ms/KB
+        //     48 KB 16.1 ms   0.34 ms/KB
+        //     56 KB 35.0 ms   0.63 ms/KB
+        //     64 KB 51.8 ms   0.81 ms/KB
+        //
+        // At 64 KB that is 130 ms on hardware 2.5x slower -- past the budget,
+        // so the document would be cut to plain on every attempt. At 32 KB it
+        // is about 20 ms there, which is the headroom every other cap has.
+        case .sql: 32 * 1024
         }
     }
 
@@ -196,13 +192,20 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
 
     /// The injections query, if this language embeds others.
     ///
-    /// Only HTML does. The file marks the body of a `<script>` or `<style>`
+    /// HTML and PHP do. HTML's file marks the body of a `<script>` or `<style>`
     /// element and tags it with a language NAME -- tree-sitter's name, not
     /// ours; upstream is explicit that these are not standardised, which is why
     /// `init?(injectionName:)` exists rather than a rawValue lookup.
     public var injectionQueryFile: String? {
         switch self {
         case .html: "html/injections.scm"
+        // PHP's is `injections-text.scm`, which upstream ships separately from
+        // `injections.scm` precisely because it is the one a template editor
+        // wants: it marks every `(text)` node -- the HTML around the PHP -- as
+        // one COMBINED injection. `injections.scm` is deliberately not
+        // vendored; it injects phpdoc into comments and names a heredoc's
+        // language after its terminator, and this app has neither grammar.
+        case .php: "php/injections-text.scm"
         default: nil
         }
     }
@@ -217,6 +220,7 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         switch injectionName {
         case "javascript": self = .javascript
         case "css": self = .css
+        case "html": self = .html
         default: return nil
         }
     }
@@ -233,6 +237,9 @@ public enum SyntaxLanguage: String, Sendable, CaseIterable {
         case .typescript: "typescript"
         case .python: "python"
         case .shell: "bash"
+        case .java: "java"
+        case .php: "php"
+        case .sql: "sql"
         }
     }
 }

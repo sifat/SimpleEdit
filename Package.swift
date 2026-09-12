@@ -47,11 +47,38 @@ let package = Package(
         // others give: Bash's 0.25 manifests list scanner.c unconditionally, so
         // that hazard does not arise. highlights.scm is byte-identical between
         // the two tags, so the only difference is the parser, and 0.25.1's is
-        // ABI 15 where every other grammar here is ABI 14. A new compatibility
-        // surface bought for no highlighting difference. Its manifest also asks
+        // ABI 15 where, when this was pinned, every other grammar here was
+        // ABI 14 -- PHP and SQL have since joined it, each for a parse-failure
+        // reason. Still a surface bought for no highlighting difference here.
+        // Its manifest also asks
         // for swift-tree-sitter `from: "0.25.0"`, the tag that is older than
         // 0.10.0; test-only and pruned, but not a thing to invite.
         .package(url: "https://github.com/tree-sitter/tree-sitter-bash", exact: "0.23.3"),
+        // 0.23.5 is the newest tag there is. Java has no external scanner, so
+        // the scanner hazard the other pins guard against cannot arise here.
+        .package(url: "https://github.com/tree-sitter/tree-sitter-java", exact: "0.23.5"),
+        // 0.24.2, and the first of two ABI 15 grammars here (SQL is the other)
+        // -- an exception argued in
+        // Resources/Queries/php/SOURCE.md rather than taken lightly. The short
+        // of it: no ABI 14 tag parses an enum that declares a `const`, which
+        // broke 6 of 6 such files in a real Drupal 10 tree, and upstream's
+        // master is ABI 15 only, so no later fix will ever reach one. Core is
+        // 0.25.10, which accepts ABI 13-15.
+        .package(url: "https://github.com/tree-sitter/tree-sitter-php", exact: "0.24.2"),
+        // SQL is the first dependency from outside the tree-sitter organisation,
+        // and the first pinned by REVISION rather than by tag. It has to be:
+        // this grammar does not commit its generated parser.c, so its tags
+        // cannot build -- their own Package.swift lists a file that is not
+        // there. Upstream publishes the generated sources to the `gh-pages`
+        // branch instead, one "deploy: <main sha>" commit per change, and that
+        // branch keeps its history rather than being force-replaced, so a
+        // revision pin stays fetchable. This one is the deploy of main
+        // b7057b7 (2026-09-10). Its test-only dependency on swift-tree-sitter
+        // is pruned: Package.resolved gains one pin, not two.
+        .package(
+            url: "https://github.com/DerekStride/tree-sitter-sql",
+            revision: "593a5ecc5dc3889890d8b24ba8fa7487ee01bfe5"
+        ),
     ],
     targets: [
         // Foundation only, no AppKit — so `swift test` can cover the parts where a
@@ -77,6 +104,14 @@ let package = Package(
                 .product(name: "TreeSitterTypeScript", package: "tree-sitter-typescript"),
                 .product(name: "TreeSitterPython", package: "tree-sitter-python"),
                 .product(name: "TreeSitterBash", package: "tree-sitter-bash"),
+                .product(name: "TreeSitterJava", package: "tree-sitter-java"),
+                // The package builds two grammars, php and php_only. Only
+                // tree_sitter_php() is referenced, so the linker drops the
+                // other; it is still compiled.
+                .product(name: "TreeSitterPHP", package: "tree-sitter-php"),
+                // By far the largest grammar here: 11.2 MB of compiled parse
+                // tables per architecture, against 1.5 MB for the next biggest.
+                .product(name: "TreeSitterSql", package: "tree-sitter-sql"),
             ],
             swiftSettings: swiftSettings
         ),
